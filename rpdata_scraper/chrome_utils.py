@@ -59,12 +59,12 @@ def setup_chrome_driver(headless=True, download_dir=None):
             }
             options.add_experimental_option("prefs", prefs)
         
-        # Determine Chrome binary location - first check environment variable
-        chrome_binary = os.environ.get("CHROME_BINARY_PATH")
-        
-        # If environment variable isn't set, check common locations
-        if not chrome_binary:
-            logger.info("CHROME_BINARY_PATH not set, checking common locations...")
+        # Determine Chrome binary location - check environment variable first
+        chrome_binary = os.getenv("CHROME_BINARY_PATH", "/usr/bin/google-chrome")
+
+        # Verify if the binary exists and is executable
+        if not (chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK)):
+            logger.warning(f"Chrome binary at {chrome_binary} is missing or not executable. Checking common locations...")
             render_chrome_paths = [
                 "/usr/bin/chrome",  # Symlink from build script
                 "/usr/bin/google-chrome-stable",
@@ -72,14 +72,22 @@ def setup_chrome_driver(headless=True, download_dir=None):
                 "/opt/google/chrome/chrome",
                 "/usr/bin/chromium-browser"
             ]
-            
+
             for path in render_chrome_paths:
-                if os.path.exists(path) and os.path.isfile(path):
+                if os.path.exists(path) and os.access(path, os.X_OK):
                     chrome_binary = path
-                    logger.info(f"Found Chrome binary at: {chrome_binary}")
+                    logger.info(f"Found valid Chrome binary at: {chrome_binary}")
                     break
+            else:
+                logger.error("No valid Chrome binary found! The driver may not work.")
+
+        # Set the binary location in Chrome options
+        if chrome_binary:
+            options.binary_location = chrome_binary
+            logger.info(f"Using Chrome binary at: {chrome_binary}")
         else:
-            logger.info(f"Using Chrome binary from environment: {chrome_binary}")
+            logger.warning("No valid Chrome binary set. Selenium may fail to launch Chrome.")
+
         
         # Verify the binary exists and is executable
         if chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK):
