@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Chrome utilities for web scraping with undetected-chromedriver
+# Chrome utilities for web scraping with undetected-chromedriver on Render
 
 import os
 import sys
@@ -16,10 +16,9 @@ from selenium.common.exceptions import TimeoutException
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def setup_chrome_driver(headless=False, download_dir=None):
+def setup_chrome_driver(headless=True, download_dir=None):
     """
-    Set up and return an Undetected ChromeDriver instance with optimal settings.
-    Works across different environments including Render.
+    Set up and return an Undetected ChromeDriver instance optimized for Render environments.
     
     Args:
         headless (bool): Whether to run Chrome in headless mode
@@ -29,26 +28,27 @@ def setup_chrome_driver(headless=False, download_dir=None):
         driver: Configured undetected_chromedriver instance
     """
     try:
-        logger.info("Setting up Undetected ChromeDriver...")
+        logger.info("Setting up Undetected ChromeDriver for Render...")
         
         # Configure Chrome options
         options = uc.ChromeOptions()
         
+        # Add headless mode - always use new headless
         if headless:
-            options.add_argument("--headless=new")  # Use new headless mode
+            options.add_argument("--headless=new")
         
-        # Add common options to make detection harder
+        # Add common options required for Render
         options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-dev-shm-usage")  # Critical for Render
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-gpu")  # Helps avoid crashes in headless mode
+        options.add_argument("--disable-gpu")
         
         # Set a realistic user agent
-        user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+        user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         options.add_argument(f'user-agent={user_agent}')
         
-        # Set download preferences if a download directory is specified
+        # Set download preferences if specified
         if download_dir:
             os.makedirs(download_dir, exist_ok=True)
             prefs = {
@@ -59,91 +59,67 @@ def setup_chrome_driver(headless=False, download_dir=None):
             }
             options.add_experimental_option("prefs", prefs)
         
-        # Detect environment
-        is_render = os.environ.get("RENDER") == "true" or "RENDER" in os.environ
+        # Determine Chrome binary location - first check environment variable
+        chrome_binary = os.environ.get("CHROME_BINARY_PATH")
         
-        # Binary location handling for different environments
-        if is_render:
-            logger.info("Detected Render environment - using special configuration")
-            # Check specific Render paths for Chrome
+        # If environment variable isn't set, check common locations
+        if not chrome_binary:
+            logger.info("CHROME_BINARY_PATH not set, checking common locations...")
             render_chrome_paths = [
-                "/usr/bin/chrome",  # Our symlink from build script
+                "/usr/bin/chrome",  # Symlink from build script
                 "/usr/bin/google-chrome-stable",
                 "/usr/bin/google-chrome",
-                "/opt/google/chrome/chrome"
+                "/opt/google/chrome/chrome",
+                "/usr/bin/chromium-browser"
             ]
             
-            for chrome_path in render_chrome_paths:
-                if os.path.exists(chrome_path):
-                    logger.info(f"Found Chrome in Render at: {chrome_path}")
-                    options.binary_location = chrome_path
+            for path in render_chrome_paths:
+                if os.path.exists(path) and os.path.isfile(path):
+                    chrome_binary = path
+                    logger.info(f"Found Chrome binary at: {chrome_binary}")
                     break
-                    
-            # If no binary is found, let it use default but log it
-            if not hasattr(options, 'binary_location') or not options.binary_location:
-                logger.warning("No Chrome binary found in Render environment!")
-                
-        elif platform.system() == "Darwin" and platform.machine() == "arm64":
-            logger.info("Detected Mac with ARM architecture")
-            # Check for common browser locations on Mac
-            mac_chrome_paths = [
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                "/Applications/Chromium.app/Contents/MacOS/Chromium",
-                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-                os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-            ]
-            
-            for chrome_path in mac_chrome_paths:
-                if os.path.exists(chrome_path):
-                    logger.info(f"Using browser at: {chrome_path}")
-                    options.binary_location = chrome_path
-                    break
-                    
-        elif platform.system() == "Linux":
-            logger.info("Detected Linux environment")
-            # Common Chrome locations on Linux
-            linux_chrome_paths = [
-                "/usr/bin/google-chrome-stable",
-                "/usr/bin/google-chrome",
-                "/usr/bin/chromium-browser",
-                "/usr/bin/chromium",
-                "/opt/google/chrome/chrome"
-            ]
-            
-            for chrome_path in linux_chrome_paths:
-                if os.path.exists(chrome_path):
-                    logger.info(f"Using Chrome at: {chrome_path}")
-                    options.binary_location = chrome_path
-                    break
-        
-        # Log the binary location being used
-        if hasattr(options, 'binary_location') and options.binary_location:
-            logger.info(f"Chrome binary location set to: {options.binary_location}")
         else:
-            logger.info("No specific Chrome binary set, using system default")
+            logger.info(f"Using Chrome binary from environment: {chrome_binary}")
         
-        # Initialize the driver with different approaches based on environment
-        if is_render:
-            logger.info("Using custom driver initialization for Render")
-            # For Render, we need to be explicit about not auto-detecting the version
-            # and ensuring binary_location is properly set
+        # Verify the binary exists and is executable
+        if chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK):
+            logger.info(f"Setting Chrome binary location to: {chrome_binary}")
+            options.binary_location = chrome_binary
+        else:
+            logger.warning(f"Chrome binary not found or not executable at {chrome_binary}")
+            logger.warning("Will attempt to use system default Chrome (may fail)")
+            # Don't set binary_location if we don't have a valid path
+            chrome_binary = None
+        
+        # Initialize driver with different approaches based on whether we have a valid binary
+        if chrome_binary:
+            logger.info(f"Initializing Chrome with binary: {chrome_binary}")
             driver = uc.Chrome(
                 options=options,
                 version_main=None,  # Auto-detect Chrome version
                 use_subprocess=True,
-                headless=headless,  # This is needed for newer versions
-                no_sandbox=True     # Important on Render
+                headless=headless,  # Explicit headless parameter
+                no_sandbox=True     # Required for Render
             )
         else:
-            # Standard initialization for non-Render environments
+            # Try without setting binary_location explicitly
+            logger.warning("Trying to initialize driver without explicit binary location")
+            # Create new options without binary_location to avoid the string error
+            basic_options = uc.ChromeOptions()
+            basic_options.add_argument("--no-sandbox")
+            basic_options.add_argument("--disable-dev-shm-usage")
+            if headless:
+                basic_options.add_argument("--headless=new")
+            
             driver = uc.Chrome(
-                options=options,
+                options=basic_options,
                 version_main=None,
-                use_subprocess=True
+                use_subprocess=True,
+                headless=headless,
+                no_sandbox=True
             )
         
-        # Explicitly set window size
+        # Set window size explicitly
         driver.set_window_size(1920, 1080)
         
         # Make detection harder by modifying navigator properties
@@ -153,7 +129,7 @@ def setup_chrome_driver(headless=False, download_dir=None):
                 get: () => undefined
             });
             
-            // Add plugins array to seem more like a real browser
+            // Add plugins array to mimic a real browser
             Object.defineProperty(navigator, 'plugins', {
                 get: function() {
                     return [

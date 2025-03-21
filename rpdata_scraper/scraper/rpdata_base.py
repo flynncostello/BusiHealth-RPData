@@ -5,9 +5,12 @@ import time
 import random
 import logging
 import os
+import sys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chrome_utils import setup_chrome_driver
 
 
