@@ -53,15 +53,15 @@ echo "export CHROME_BINARY_PATH=\"$CHROME_BIN\"" >> ~/.bashrc
 echo "export PATH=\"\$PATH:/opt/render/project/bin\"" >> ~/.bashrc
 
 # 3. Add to project .env file (another alternative)
-echo "export CHROME_BINARY_PATH=\"$CHROME_BIN\"" >> /opt/render/project/src/.env
+echo "export CHROME_BINARY_PATH=\"$CHROME_BIN\"" > /opt/render/project/src/.env
 echo "export PATH=\"\$PATH:/opt/render/project/bin\"" >> /opt/render/project/src/.env
 
 # 4. Create a dedicated env.sh script that can be sourced
 mkdir -p /opt/render/project/src/env
-cat > /opt/render/project/src/env/chrome.sh << EOL
+cat > /opt/render/project/src/env/chrome.sh << 'EOL'
 #!/bin/bash
-export CHROME_BINARY_PATH="$CHROME_BIN"
-export PATH="\$PATH:/opt/render/project/bin"
+export CHROME_BINARY_PATH="/opt/render/project/.render/chrome/opt/google/chrome/chrome"
+export PATH="$PATH:/opt/render/project/bin"
 EOL
 chmod +x /opt/render/project/src/env/chrome.sh
 
@@ -112,4 +112,4 @@ echo "Symlink status: $(ls -la /opt/render/project/bin/chrome 2>/dev/null || ech
 echo "===================================="
 echo "Render Build Complete!"
 echo "Chrome is at: $CHROME_BINARY_PATH"
-echo "====================================">
+echo "===================================="
