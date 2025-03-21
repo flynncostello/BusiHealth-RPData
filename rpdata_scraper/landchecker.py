@@ -46,8 +46,14 @@ class LandcheckerScraper:
             user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
             options.add_argument(f'user-agent={user_agent}')
             
-            # Set specific binary location for Macs with ARM chip if needed
-            if platform.system() == "Darwin" and platform.machine() == "arm64":
+            # Special handling for Render environment
+            is_render = "RENDER" in os.environ
+            
+            if is_render:
+                logger.info("Detected Render environment - using special configuration")
+                # For Render, don't set binary_location manually
+                # Let undetected_chromedriver find installed Chrome
+            elif platform.system() == "Darwin" and platform.machine() == "arm64":
                 logger.info("Detected Mac with ARM architecture - applying special configuration")
                 # Check for common browser locations
                 chromium_paths = [
@@ -64,13 +70,45 @@ class LandcheckerScraper:
                         logger.info(f"Using browser at: {browser_path}")
                         options.binary_location = browser_path
                         break
+            elif platform.system() == "Linux":
+                logger.info("Detected Linux environment - checking Chrome locations")
+                # Common Chrome locations on Linux
+                linux_chrome_paths = [
+                    "/usr/bin/google-chrome-stable",
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/chromium-browser",
+                    "/usr/bin/chromium",
+                    "/usr/bin/chrome",
+                    "/opt/google/chrome/chrome"
+                ]
+                
+                for chrome_path in linux_chrome_paths:
+                    if os.path.exists(chrome_path):
+                        logger.info(f"Using Chrome at: {chrome_path}")
+                        options.binary_location = chrome_path
+                        break
             
-            # Initialize undetected ChromeDriver
-            self.driver = uc.Chrome(
-                options=options,
-                version_main=None,  # Let undetected-chromedriver figure out the version
-                use_subprocess=True  # More stable
-            )
+            # Log what we're doing with binary location
+            if hasattr(options, 'binary_location') and options.binary_location:
+                logger.info(f"Chrome binary location set to: {options.binary_location}")
+            else:
+                logger.info("No specific Chrome binary set, using system default")
+            
+            # Initialize undetected ChromeDriver with special handling for Render
+            if is_render:
+                logger.info("Using custom driver initialization for Render")
+                self.driver = uc.Chrome(
+                    options=options,
+                    version_main=None,
+                    use_subprocess=True,
+                    driver_executable_path=None  # Let it auto-detect
+                )
+            else:
+                self.driver = uc.Chrome(
+                    options=options,
+                    version_main=None,
+                    use_subprocess=True
+                )
             
             # Set the window size explicitly
             self.driver.set_window_size(1920, 1080)

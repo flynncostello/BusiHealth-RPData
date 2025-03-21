@@ -16,9 +16,21 @@ apt-get update -qq
 # Install Chrome with minimal dependencies
 apt-get install -y --no-install-recommends google-chrome-stable
 
-# Print Chrome version
+# Print Chrome version and location
 echo "Chrome version installed:"
 google-chrome --version
+echo "Chrome binary location:"
+which google-chrome
+
+# Create a symlink to ensure Chrome is in a standard location
+ln -sf $(which google-chrome) /usr/bin/chrome
+echo "Created symlink to Chrome at /usr/bin/chrome"
+
+# Add environment variable to indicate we're in Render
+echo "export RENDER=true" >> /etc/environment
+
+# Install other dependencies
+apt-get install -y --no-install-recommends xvfb
 
 # Create necessary directories
 mkdir -p downloads merged_properties tmp
