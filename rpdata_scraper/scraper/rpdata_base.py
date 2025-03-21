@@ -54,6 +54,9 @@ class RPDataBase:
             user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
             options.add_argument(f'user-agent={user_agent}')
             
+            # Handle different environments more safely
+            chrome_binary = None
+            
             # Set specific binary location for Macs with ARM chip if needed
             if platform.system() == "Darwin" and platform.machine() == "arm64":
                 logger.info("Detected Mac with ARM architecture - applying special configuration")
@@ -70,8 +73,32 @@ class RPDataBase:
                 for browser_path in chromium_paths:
                     if os.path.exists(browser_path):
                         logger.info(f"Using browser at: {browser_path}")
-                        options.binary_location = browser_path
+                        chrome_binary = browser_path
                         break
+            
+            # For Linux environments like Render
+            elif platform.system() == "Linux":
+                logger.info("Detected Linux environment - using default Chrome locations")
+                # Common Chrome locations on Linux
+                linux_chrome_paths = [
+                    "/usr/bin/google-chrome",
+                    "/usr/bin/chromium-browser",
+                    "/usr/bin/chromium",
+                    "/opt/google/chrome/chrome"
+                ]
+                
+                for chrome_path in linux_chrome_paths:
+                    if os.path.exists(chrome_path):
+                        logger.info(f"Using Chrome at: {chrome_path}")
+                        chrome_binary = chrome_path
+                        break
+            
+            # Only set binary_location if we found a valid path
+            if chrome_binary:
+                options.binary_location = chrome_binary
+                logger.info(f"Set Chrome binary location to: {chrome_binary}")
+            else:
+                logger.info("No specific Chrome binary set, using system default")
             
             # Initialize undetected ChromeDriver
             self.driver = uc.Chrome(
