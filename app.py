@@ -329,4 +329,9 @@ if __name__ == '__main__':
     logger.info(f"Current working directory: {os.getcwd()}")
     logger.info(f"Python executable: {os.path.abspath(os.__file__)}")
     
-    app.run(debug=True)
+    # Get port from environment variable (Render sets this)
+    port = int(os.environ.get("PORT", 10000))
+    
+    # Run the app with the right host and port
+    # Use 0.0.0.0 to bind to all interfaces so Render can connect to it
+    app.run(host="0.0.0.0", port=port, debug=True)
