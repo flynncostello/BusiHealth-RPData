@@ -63,7 +63,10 @@ import time
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
-from scraper.rpdata_base import RPDataBase, logger
+
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from rpdata_base import RPDataBase, logger
 
 # Define constants for filter results to avoid string comparison issues
 FILTER_NO_RESULTS = 0
@@ -891,210 +894,193 @@ class RPDataScraper(RPDataBase):
             return self.return_to_dashboard()
     
     def select_all_results(self):
-        """Select all displayed results. Returns False if no results were found."""
+        """Select all displayed results. Returns False ONLY if no results were found."""
         logger.info("===== SELECTING ALL RESULTS =====")
         
         try:
-            # First, check if there are any results at all
+            # First, check if there are genuinely NO results
             try:
-                # Look for indicators of no results
+                # Look ONLY for definitive indicators of no results
+                no_results = False
+                
+                # Check for explicit "No matching properties found" message
+                try:
+                    no_matches = self.driver.find_element(
+                        By.XPATH, 
+                        "//div[contains(text(), 'No matching properties found')]"
+                    )
+                    if no_matches and no_matches.is_displayed():
+                        logger.info("No matching properties found - returning to home page")
+                        return False
+                except:
+                    pass
+                    
+                # Check for explicit zero results indicators
                 no_results_indicators = [
-                    "//div[contains(text(), 'No results found')]",
-                    "//div[contains(text(), 'No properties found')]",
-                    "//div[contains(text(), '0 properties')]",
-                    "//div[contains(text(), '0 result')]"
+                    "//div[text()='No results found']",
+                    "//div[text()='No properties found']",
+                    "//div[contains(text(), '0 properties') and not(contains(text(), 'of'))]",
+                    "//div[contains(text(), '0 result') and not(contains(text(), 'of'))]"
                 ]
                 
                 for indicator in no_results_indicators:
                     try:
-                        no_results = self.driver.find_element(By.XPATH, indicator)
-                        if no_results and no_results.is_displayed():
-                            logger.info(f"No search results found: {no_results.text}")
-                            return False  # Return False to indicate no results
+                        element = self.driver.find_element(By.XPATH, indicator)
+                        if element and element.is_displayed():
+                            logger.info(f"No search results found: {element.text}")
+                            no_results = True
+                            break
                     except:
                         continue
                 
-                # Also check if the results count shows zero
-                try:
-                    results_text = self.driver.find_element(
-                        By.XPATH, 
-                        "//div[contains(@class, 'result-count-main')]"
-                    ).text
-                    
-                    if "0 of" in results_text or "Displaying 0" in results_text:
-                        logger.info(f"Zero results indicated in count: {results_text}")
-                        return False
-                except:
-                    pass
-                
-                # Try to find the multi-select checkbox - if not found after multiple attempts,
-                # it likely means there are no results
-                try:
-                    container = self.driver.find_element(
-                        By.XPATH,
-                        "//div[@data-testid='rapid-multi-select-counter']"
-                    )
-                    logger.info("Found results container, proceeding with selection")
-                except Exception as e:
-                    # Wait a moment and try again in case it's still loading
-                    logger.warning(f"Multi-select container not found on first attempt: {e}")
-                    time.sleep(1)
-                    
+                # Check if results count explicitly shows zero (but avoid false positives)
+                if not no_results:
                     try:
-                        container = self.driver.find_element(
-                            By.XPATH,
-                            "//div[@data-testid='rapid-multi-select-counter']"
+                        results_element = self.driver.find_element(
+                            By.XPATH, 
+                            "//div[contains(@class, 'result-count-main')]"
                         )
-                        logger.info("Found results container on second attempt")
-                    except Exception as e:
-                        logger.info("Multi-select container still not found - likely no results")
-                        return False
+                        results_text = results_element.text
+                        
+                        # Only consider it "no results" if it explicitly has "0 " at the start 
+                        # (to avoid matching "10 of 10" or similar)
+                        if results_text.strip().startswith("0 ") or "Displaying 0" in results_text:
+                            logger.info(f"Zero results indicated in count: {results_text}")
+                            no_results = True
+                        else:
+                            # Log what was found - this helps with debugging
+                            logger.info(f"Results found: {results_text}")
+                    except:
+                        pass
+                
+                # If we've determined there are no results, return False
+                if no_results:
+                    return False
                 
             except Exception as e:
-                logger.warning(f"Error checking for no results: {e}")
-                # Continue anyway in case we can still find the checkbox
+                logger.warning(f"Error during no-results check: {e}")
+                # Continue anyway - we'll try to select results
             
-            # COMPLETELY REVISED: Find and click the CHECKBOX INPUT directly
-            # Try multiple strategies to find and click the checkbox
+            # We've reached here, so we assume there ARE results - try to select them
+            
+            # MULTI-STRATEGY APPROACH: Try several methods to find and click the checkbox
+            checkbox_clicked = False
             
             # Strategy 1: Find the checkbox input directly by its class
-            try:
-                # Find the input with the specific class
-                checkbox_input = self.driver.find_element(
-                    By.XPATH,
-                    "//input[@class='PrivateSwitchBase-input css-1m9pwf3']"
-                )
-                logger.info("Found checkbox input directly by class")
-                
-                # Click using regular click - this should work for an input type checkbox
-                checkbox_input.click()
-                logger.info("Clicked checkbox input directly")
-                
-                # Wait for dropdown to appear - shorter wait time
-                logger.info("Waiting 1.5 seconds for dropdown to appear...")
-                time.sleep(1.5)
-            except Exception as e:
-                logger.warning(f"Direct checkbox input click failed: {e}")
-                
-                # Strategy 2: Find through the parent span with data-testid
+            if not checkbox_clicked:
                 try:
-                    # Find the parent span first
+                    checkbox_input = self.driver.find_element(
+                        By.XPATH,
+                        "//input[@class='PrivateSwitchBase-input css-1m9pwf3']"
+                    )
+                    logger.info("Found checkbox input directly by class")
+                    checkbox_input.click()
+                    logger.info("Clicked checkbox input directly")
+                    checkbox_clicked = True
+                    time.sleep(1.5)  # Wait for dropdown to appear
+                except Exception as e:
+                    logger.warning(f"Direct checkbox input click failed: {e}")
+            
+            # Strategy 2: Find through the parent span with data-testid
+            if not checkbox_clicked:
+                try:
                     checkbox_span = self.driver.find_element(
                         By.XPATH,
                         "//span[@data-testid='multi-select-check-icon']"
                     )
                     logger.info("Found checkbox span by data-testid")
-                    
-                    # Then find the input within it
                     checkbox_input = checkbox_span.find_element(By.XPATH, ".//input[@type='checkbox']")
                     logger.info("Found checkbox input within span")
-                    
-                    # Click the input directly
                     checkbox_input.click()
                     logger.info("Clicked checkbox input within span")
-                    
-                    # Wait for dropdown to appear - shorter wait time
-                    logger.info("Waiting 1.5 seconds for dropdown to appear...")
+                    checkbox_clicked = True
                     time.sleep(1.5)
                 except Exception as e:
                     logger.warning(f"Checkbox within span click failed: {e}")
-                    
-                    # Strategy 3: Find through the container div
-                    try:
-                        # Find the container first
-                        container = self.driver.find_element(
-                            By.XPATH,
-                            "//div[@data-testid='rapid-multi-select-counter']"
-                        )
-                        logger.info("Found multi-select counter container")
-                        
-                        # Find checkbox input within container
-                        checkbox_input = container.find_element(By.XPATH, ".//input[@type='checkbox']")
-                        logger.info("Found checkbox input within container")
-                        
-                        # Click the input directly
-                        checkbox_input.click()
-                        logger.info("Clicked checkbox input within container")
-                        
-                        # Wait for dropdown to appear - shorter wait time
-                        logger.info("Waiting 1.5 seconds for dropdown to appear...")
-                        time.sleep(1.5)
-                    except Exception as e:
-                        logger.warning(f"Checkbox within container click failed: {e}")
-                        
-                        # Strategy 4: JavaScript approach on span
-                        try:
-                            # Find the span by data-testid
-                            checkbox_span = self.driver.find_element(
-                                By.XPATH,
-                                "//span[@data-testid='multi-select-check-icon']"
-                            )
-                            logger.info("Found checkbox span for JavaScript approach")
-                            
-                            # Use JavaScript to click the span (which might trigger the input's click)
-                            self.driver.execute_script("arguments[0].click();", checkbox_span)
-                            logger.info("Clicked checkbox span with JavaScript")
-                            
-                            # Wait for dropdown to appear - shorter wait time
-                            logger.info("Waiting 1.5 seconds for dropdown to appear...")
-                            time.sleep(1.5)
-                        except Exception as e:
-                            logger.error(f"All checkbox click strategies failed: {e}")
-                            return False
             
-            # Now find and click the middle option (Select All / Select First 10,000)
-            try:
-                # Try to find all options in the dropdown
-                option_labels = self.driver.find_elements(
-                    By.XPATH,
-                    "//span[@data-testid='single-select-checkbox-label']"
-                )
-                
-                if len(option_labels) >= 3:
-                    # Get the middle label (index 1)
-                    middle_label = option_labels[1]
-                    middle_text = middle_label.text
-                    logger.info(f"Found middle option label: {middle_text}")
-                    
-                    # Click the middle option label
-                    middle_label.click()
-                    logger.info(f"Clicked middle option: {middle_text}")
-                    
-                    # Wait for selection to be applied - shorter wait time
-                    time.sleep(0.5)
-                    return True
-                else:
-                    # Try to directly find the inputs
-                    radio_inputs = self.driver.find_elements(
+            # Strategy 3: Find through the container div
+            if not checkbox_clicked:
+                try:
+                    container = self.driver.find_element(
                         By.XPATH,
-                        "//input[@data-testid='single-select-checkbox']"
+                        "//div[@data-testid='rapid-multi-select-counter']"
+                    )
+                    logger.info("Found multi-select counter container")
+                    checkbox_input = container.find_element(By.XPATH, ".//input[@type='checkbox']")
+                    logger.info("Found checkbox input within container")
+                    checkbox_input.click()
+                    logger.info("Clicked checkbox input within container")
+                    checkbox_clicked = True
+                    time.sleep(1.5)
+                except Exception as e:
+                    logger.warning(f"Checkbox within container click failed: {e}")
+            
+            # Strategy 4: JavaScript approach on span
+            if not checkbox_clicked:
+                try:
+                    checkbox_span = self.driver.find_element(
+                        By.XPATH,
+                        "//span[@data-testid='multi-select-check-icon']"
+                    )
+                    logger.info("Found checkbox span for JavaScript approach")
+                    self.driver.execute_script("arguments[0].click();", checkbox_span)
+                    logger.info("Clicked checkbox span with JavaScript")
+                    checkbox_clicked = True
+                    time.sleep(1.5)
+                except Exception as e:
+                    logger.error(f"All checkbox click strategies failed: {e}")
+                    return False  # Only return False here if we couldn't click ANY checkbox
+            
+            # Only proceed to dropdown selection if we successfully clicked a checkbox
+            if checkbox_clicked:
+                try:
+                    # Try to find all options in the dropdown
+                    option_labels = self.driver.find_elements(
+                        By.XPATH,
+                        "//span[@data-testid='single-select-checkbox-label']"
                     )
                     
-                    if len(radio_inputs) >= 3:
-                        # Click the middle radio option (index 1)
-                        middle_radio = radio_inputs[1]
-                        middle_radio.click()
-                        logger.info("Clicked middle radio input")
+                    if len(option_labels) >= 3:
+                        # Get the middle label (index 1) - usually "Select All"
+                        middle_label = option_labels[1]
+                        middle_text = middle_label.text
+                        logger.info(f"Found middle option label: {middle_text}")
                         
-                        # Wait for selection to be applied - shorter wait time
+                        # Click the middle option label
+                        middle_label.click()
+                        logger.info(f"Clicked middle option: {middle_text}")
                         time.sleep(0.5)
                         return True
                     else:
-                        # Last resort: try to find by id
-                        all_option = self.driver.find_element(
+                        # Try to directly find the inputs
+                        radio_inputs = self.driver.find_elements(
                             By.XPATH,
-                            "//input[@id='all-option']"
+                            "//input[@data-testid='single-select-checkbox']"
                         )
                         
-                        all_option.click()
-                        logger.info("Clicked 'all-option' by ID")
-                        time.sleep(0.5)
-                        return True
-            except Exception as e:
-                logger.error(f"Failed to click middle option: {e}")
-                return False
+                        if len(radio_inputs) >= 3:
+                            # Click the middle radio option (index 1)
+                            middle_radio = radio_inputs[1]
+                            middle_radio.click()
+                            logger.info("Clicked middle radio input")
+                            time.sleep(0.5)
+                            return True
+                        else:
+                            # Last resort: try to find by id
+                            all_option = self.driver.find_element(
+                                By.XPATH,
+                                "//input[@id='all-option']"
+                            )
+                            
+                            all_option.click()
+                            logger.info("Clicked 'all-option' by ID")
+                            time.sleep(0.5)
+                            return True
+                except Exception as e:
+                    logger.error(f"Failed to click dropdown option: {e}")
+                    return False
             
-            logger.error("Failed to select all results")
+            logger.error("Failed to select all results - reached end of function")
             return False
             
         except Exception as e:

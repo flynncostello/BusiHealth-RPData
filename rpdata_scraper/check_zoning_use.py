@@ -4,8 +4,6 @@
 
 import os
 import logging
-import pandas as pd
-import openpyxl
 from openpyxl import load_workbook
 
 # Set up logging

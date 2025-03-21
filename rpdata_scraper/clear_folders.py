@@ -5,14 +5,17 @@ import shutil
 def clear_folders():
     """
     Clears all contents of the 'downloads' and 'merged_properties' folders
-    that are in the same directory as this script.
+    that are in the parent directory of this script.
     """
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
-    # Define the paths to the folders
-    downloads_path = os.path.join(script_dir, 'downloads')
-    merged_properties_path = os.path.join(script_dir, 'merged_properties')
+    # Get parent directory (one level up)
+    parent_dir = os.path.dirname(script_dir)
+    
+    # Define the paths to the folders in the parent directory
+    downloads_path = os.path.join(parent_dir, 'downloads')
+    merged_properties_path = os.path.join(parent_dir, 'merged_properties')
     
     folders_to_clear = [downloads_path, merged_properties_path]
     

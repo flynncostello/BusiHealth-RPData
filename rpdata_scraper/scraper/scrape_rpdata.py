@@ -2,9 +2,11 @@
 # Main script for running RP Data scraper
 
 import os
-from scraper.setup_rpdata_scraper import RPDataScraper, logger
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from setup_rpdata_scraper import RPDataScraper, logger
 
-def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", headless=False):
+def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", headless=False, progress_callback=None):
     """
     Scrape property data from RP Data.
     
@@ -18,6 +20,10 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
     Returns:
         dict: Dictionary with file paths for each search type
     """
+    # Default progress reporting function if none provided
+    if progress_callback is None:
+        def progress_callback(percentage, message):
+            pass  # No-op if no callback provided
     if locations is None:
         locations = []
     
@@ -28,6 +34,8 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
     result_files = {}
     
     try:
+        progress_callback(15, "Logging into RP Data...")
+
         # Login
         login_success = scraper.login("busihealth", "Busihealth123")
         if not login_success:
@@ -35,10 +43,18 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             scraper.close()
             return result_files
         
+        
         # Process each search type
         search_types = ["For Rent", "For Sale", "Sales"]
-        
+
+        progress_callback(16, "Getting each search type data from RP Data...")
+
+
+        i = 0
         for search_type in search_types:
+            progress_callback(20+i*10, f"Getting results for {search_type} data...")
+            i += 1
+
             logger.info(f"\n===== STARTING SEARCH TYPE: {search_type} =====\n")
             
             # Select search type
@@ -86,6 +102,8 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                     logger.error(f"Failed to return to dashboard after: {search_type}, aborting")
                     break
         
+        progress_callback(43, "Downloaded all data from RPData...")
+
         return result_files
     
     except Exception as e:
@@ -98,9 +116,9 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
 if __name__ == "__main__":
     # Example usage
     locations = ["Hunters Hill NSW 2110", "Crows Nest NSW 2065"]
-    property_types = ["Business", "Commercial"]
+    property_types = ["Land"]#["Business", "Commercial"]
     min_floor = "Min" # Can do a number (From 0 - 9999999999, 10 digit num is max, and min <= max otherwise error), or "Min"
-    max_floor = "500" # Can do a number, or "Max"
+    max_floor = "100" # Can do a number, or "Max"
     
     result_files = scrape_rpdata(
         locations=locations,

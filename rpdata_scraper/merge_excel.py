@@ -305,7 +305,7 @@ def download_image(url, max_retries=3):
     
     return None
 
-def process_excel_files(files_dict, locations, property_types, min_floor, max_floor, business_type, headless=False, output_file=None):
+def process_excel_files(files_dict, locations, property_types, min_floor, max_floor, business_type, headless=False, output_file=None, progress_callback=None):
     """
     Process and merge RP Data Excel files.
     
@@ -321,6 +321,10 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     Returns:
         bool: Success status
     """
+    # Default progress reporting function if none provided
+    if progress_callback is None:
+        def progress_callback(percentage, message):
+            pass  # No-op if no callback provided
     logger.info("===== PROCESSING EXCEL FILES =====")
     
     # Generate filename if not provided
@@ -379,6 +383,8 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         
         logger.info("First pass: collecting all property data and addresses...")
         
+        progress_callback(48, "Extracting data from forSale, forRent and Sales...")
+
         row_index = 0
         for search_type, file_path in files_dict.items():
             logger.info(f"Reading file for {search_type}: {file_path}")
@@ -576,7 +582,11 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         for address, count in address_counter.items():
             if count > 1:
                 logger.info(f"Duplicate address detected: '{address}' appears {count} times")
-        
+
+
+
+        progress_callback(50, "Obtaining zoning info for all properties...")
+
         # Second pass: get all zonings in one batch if we have addresses
         if all_addresses:
             logger.info(f"Second pass: getting zoning information for {len(all_addresses)} addresses in a single batch...")
@@ -656,6 +666,10 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         else:
             logger.warning("No valid addresses found for zoning lookup")
 
+
+
+        progress_callback(60, "Checking zoning table for allowable use...")
+
         ########################################################################################################################
         # TRYING TO SET AS MANY 'ALLOWABLE USE IN ZONE (T/F)' AS POSSIBLE
         # check_zoning_use.py
@@ -668,6 +682,9 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             import traceback
             logger.error(traceback.format_exc())
 
+
+
+        progress_callback(61, "Obtaining all images and agent contact details for each property from RPData links...")
 
         ########################################################################################################################
         # get_image_and_agent_phone.py
@@ -687,6 +704,10 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             logger.error(f"Error retrieving property images and agent details: {e}")
             import traceback
             logger.error(traceback.format_exc())
+
+
+
+        progress_callback(96, "Writing all properties to final merged file...")
 
         # Third pass: write all rows to the worksheet
         logger.info("Third pass: writing all rows to the output file...")

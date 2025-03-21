@@ -108,6 +108,7 @@ def get_image_and_agent_phone(all_rows, headless=False):
     Returns:
         list: Updated 2D array with image URLs and agent phone numbers
     """
+
     # Initialize undetected_chromedriver
     options = uc.ChromeOptions()
     options.add_argument("--no-sandbox")
@@ -125,6 +126,7 @@ def get_image_and_agent_phone(all_rows, headless=False):
     try:
         logger.info("Starting to process property data for images and agent details")
         
+
         for idx, row in enumerate(all_rows):
             # Get the property URL (index 24)
             property_url = row[24]
