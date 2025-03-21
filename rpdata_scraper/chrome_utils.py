@@ -59,73 +59,57 @@ def setup_chrome_driver(headless=True, download_dir=None):
             }
             options.add_experimental_option("prefs", prefs)
         
-        # Determine Chrome binary location - check environment variable first
-        chrome_binary = os.getenv("CHROME_BINARY_PATH", "/usr/bin/google-chrome")
-
-        # Verify if the binary exists and is executable
-        if not (chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK)):
-            logger.warning(f"Chrome binary at {chrome_binary} is missing or not executable. Checking common locations...")
+        # Find Chrome binary - search in this priority order:
+        
+        # 1. Check environment variable (set in build.sh)
+        chrome_binary = os.getenv("CHROME_BINARY_PATH")
+        if chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK):
+            logger.info(f"Using Chrome binary from environment variable: {chrome_binary}")
+        else:
+            # 2. Check common locations on Render
             render_chrome_paths = [
-                "/usr/bin/chrome",  # Symlink from build script
+                "/opt/render/project/.render/chrome/opt/google/chrome/chrome",  # Our build.sh location
+                "/opt/render/project/bin/chrome",  # Symlink created in build.sh
+                "/usr/bin/chrome",  # Another possible symlink
                 "/usr/bin/google-chrome-stable",
                 "/usr/bin/google-chrome",
                 "/opt/google/chrome/chrome",
                 "/usr/bin/chromium-browser"
             ]
-
+            
+            # Find the first valid Chrome binary
+            chrome_binary = None
             for path in render_chrome_paths:
                 if os.path.exists(path) and os.access(path, os.X_OK):
                     chrome_binary = path
                     logger.info(f"Found valid Chrome binary at: {chrome_binary}")
                     break
-            else:
-                logger.error("No valid Chrome binary found! The driver may not work.")
-
-        # Set the binary location in Chrome options
-        if chrome_binary:
-            options.binary_location = chrome_binary
-            logger.info(f"Using Chrome binary at: {chrome_binary}")
-        else:
-            logger.warning("No valid Chrome binary set. Selenium may fail to launch Chrome.")
-
-        
-        # Verify the binary exists and is executable
-        if chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK):
-            logger.info(f"Setting Chrome binary location to: {chrome_binary}")
-            options.binary_location = chrome_binary
-        else:
-            logger.warning(f"Chrome binary not found or not executable at {chrome_binary}")
-            logger.warning("Will attempt to use system default Chrome (may fail)")
-            # Don't set binary_location if we don't have a valid path
-            chrome_binary = None
-        
-        # Initialize driver with different approaches based on whether we have a valid binary
-        if chrome_binary:
-            logger.info(f"Initializing Chrome with binary: {chrome_binary}")
-            driver = uc.Chrome(
-                options=options,
-                version_main=None,  # Auto-detect Chrome version
-                use_subprocess=True,
-                headless=headless,  # Explicit headless parameter
-                no_sandbox=True     # Required for Render
-            )
-        else:
-            # Try without setting binary_location explicitly
-            logger.warning("Trying to initialize driver without explicit binary location")
-            # Create new options without binary_location to avoid the string error
-            basic_options = uc.ChromeOptions()
-            basic_options.add_argument("--no-sandbox")
-            basic_options.add_argument("--disable-dev-shm-usage")
-            if headless:
-                basic_options.add_argument("--headless=new")
             
-            driver = uc.Chrome(
-                options=basic_options,
-                version_main=None,
-                use_subprocess=True,
-                headless=headless,
-                no_sandbox=True
-            )
+            # If still not found and we're on macOS (local development)
+            if chrome_binary is None and platform.system() == "Darwin":
+                mac_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+                if os.path.exists(mac_path):
+                    chrome_binary = mac_path
+                    logger.info(f"Using macOS Chrome at: {chrome_binary}")
+        
+        # Only set binary_location if we found a valid binary
+        # This prevents "Binary Location Must be a String" error
+        if chrome_binary:
+            options.binary_location = chrome_binary
+            logger.info(f"Setting Chrome binary location to: {chrome_binary}")
+        else:
+            logger.warning("No valid Chrome binary found! Will attempt to use system default.")
+            # We intentionally DON'T set options.binary_location here to avoid errors
+        
+        # Initialize the driver
+        logger.info("Initializing undetected_chromedriver...")
+        driver = uc.Chrome(
+            options=options,
+            version_main=None,  # Auto-detect Chrome version
+            use_subprocess=True,
+            headless=headless,  # Explicit headless parameter
+            no_sandbox=True     # Required for Render
+        )
         
         # Set window size explicitly
         driver.set_window_size(1920, 1080)

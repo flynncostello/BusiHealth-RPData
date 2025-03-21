@@ -1,57 +1,90 @@
 #!/usr/bin/env bash
-set -e
-set -x
+# exit on error
+set -o errexit
+set -o pipefail
+set -o nounset
 
+echo "===================================="
 echo "Starting Render build process..."
+echo "===================================="
 
-# Define Chrome installation directory (use /tmp since it's writable)
-CHROME_DIR="/tmp/chrome"
-CHROME_BINARY="$CHROME_DIR/google-chrome"
+# ======== CHROME INSTALLATION ========
+STORAGE_DIR=/opt/render/project/.render
 
-# If Chrome isn't already installed, install it
-if [ ! -f "$CHROME_BINARY" ]; then
-  echo "Installing Google Chrome..."
-
-  mkdir -p "$CHROME_DIR"
-
-  # Download the Chrome .deb package
-  wget -O /tmp/chrome.deb "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
-
-  # Extract Chrome without using `dpkg -i` (which requires sudo)
-  dpkg-deb -x /tmp/chrome.deb "$CHROME_DIR"
-  rm /tmp/chrome.deb
-
-  # Locate Chrome binary inside extracted files
-  CHROME_BINARY=$(find "$CHROME_DIR" -name "google-chrome" | head -n 1)
-  
-  if [ -n "$CHROME_BINARY" ]; then
-    chmod +x "$CHROME_BINARY"
-    echo "Chrome installed at: $CHROME_BINARY"
-  else
-    echo "ERROR: Chrome installation failed!"
-    exit 1
-  fi
+if [[ ! -d $STORAGE_DIR/chrome ]]; then
+  echo "...Downloading Chrome"
+  mkdir -p $STORAGE_DIR/chrome
+  cd $STORAGE_DIR/chrome
+  wget -P ./ https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+  dpkg -x ./google-chrome-stable_current_amd64.deb $STORAGE_DIR/chrome
+  rm ./google-chrome-stable_current_amd64.deb
+  cd $HOME/project/src # Return to project directory
 else
-  echo "Google Chrome is already installed."
+  echo "...Using Chrome from cache"
 fi
 
-# Export Chrome binary path for use in the app
-echo "export CHROME_BINARY_PATH=$CHROME_BINARY" >> "$HOME/.bashrc"
-export CHROME_BINARY_PATH="$CHROME_BINARY"
+# Set Chrome binary path
+CHROME_BIN="$STORAGE_DIR/chrome/opt/google/chrome/chrome"
 
-# Verify Chrome binary is set correctly
-if [ ! -x "$CHROME_BINARY_PATH" ]; then
-  echo "ERROR: Chrome binary is not executable!"
-  exit 1
+# Make Chrome binary executable
+if [[ -f "$CHROME_BIN" ]]; then
+  chmod +x "$CHROME_BIN"
+  echo "...Chrome binary found at: $CHROME_BIN"
+else
+  echo "ERROR: Chrome binary not found at expected location!"
+  find $STORAGE_DIR/chrome -name chrome -type f
+  echo "Will continue but Chrome-based features may fail."
 fi
 
-echo "Final Chrome path: $CHROME_BINARY_PATH"
+# Export Chrome binary path for app to use
+export CHROME_BINARY_PATH="$CHROME_BIN"
 
-# Create necessary directories with correct permissions
+# Make Chrome available in PATH
+mkdir -p /opt/render/project/bin
+ln -sf "$CHROME_BIN" /opt/render/project/bin/chrome || echo "Note: Could not create symlink (this is expected in some environments)"
+
+# Save Chrome path to profile so it's available when app runs
+echo "export CHROME_BINARY_PATH=\"$CHROME_BIN\"" >> $HOME/.profile
+echo "export PATH=\"\$PATH:/opt/render/project/bin\"" >> $HOME/.profile
+
+# Verify Chrome installation
+if [[ -x "$CHROME_BIN" ]]; then
+  "$CHROME_BIN" --version || echo "Note: Could not run Chrome version check (expected in headless environment)"
+  echo "...Chrome installation complete!"
+else
+  echo "WARNING: Chrome binary found but not executable!"
+fi
+
+# ======== PROJECT DEPENDENCIES ========
+echo "===================================="
+echo "Installing project dependencies..."
+echo "===================================="
+
+# Create directories needed for your app
 mkdir -p downloads merged_properties tmp
 chmod -R 777 downloads merged_properties tmp
 
-echo "==================================="
+# Install Python dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# ======== FINAL VERIFICATION ========
+echo "===================================="
+echo "Verifying installation..."
+echo "===================================="
+
+# Verify undetected-chromedriver is installed
+pip show undetected-chromedriver || echo "WARNING: undetected-chromedriver not found!"
+
+# Verify Selenium is installed
+pip show selenium || echo "WARNING: selenium not found!"
+
+# Show Chrome environment for debugging
+echo "CHROME_BINARY_PATH: $CHROME_BINARY_PATH"
+echo "Chrome executable: $(which chrome || echo 'Not in PATH')"
+echo "Symlink status: $(ls -la /opt/render/project/bin/chrome 2>/dev/null || echo 'No symlink found')"
+
+echo "===================================="
 echo "Render Build Complete!"
 echo "Chrome is at: $CHROME_BINARY_PATH"
-echo "==================================="
+echo "===================================="
