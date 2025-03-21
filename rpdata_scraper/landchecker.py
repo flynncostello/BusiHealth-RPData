@@ -4,16 +4,15 @@
 import time
 import random
 import logging
-import sys
-import os
 import platform
-import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from chrome_utils import setup_chrome_driver
+
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -22,122 +21,9 @@ logger = logging.getLogger(__name__)
 class LandcheckerScraper:
     def __init__(self, headless=False):
         """Initialize the scraper with Undetected ChromeDriver."""
-        self.setup_driver(headless)
+        self.driver = setup_chrome_driver(headless=headless)
         self.login_url = "https://app.landchecker.com.au/login"
         
-    def setup_driver(self, headless):
-        """Set up the Undetected ChromeDriver with optimal settings."""
-        try:
-            logger.info("Setting up Undetected ChromeDriver...")
-            
-            # Configure options for undetected_chromedriver
-            options = uc.ChromeOptions()
-            
-            if headless:
-                options.add_argument("--headless")
-            
-            # Add common options to make detection harder
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_argument("--window-size=1920,1080")
-            
-            # Add a realistic user agent
-            user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
-            options.add_argument(f'user-agent={user_agent}')
-            
-            # Special handling for Render environment
-            is_render = "RENDER" in os.environ
-            
-            if is_render:
-                logger.info("Detected Render environment - using special configuration")
-                # For Render, don't set binary_location manually
-                # Let undetected_chromedriver find installed Chrome
-            elif platform.system() == "Darwin" and platform.machine() == "arm64":
-                logger.info("Detected Mac with ARM architecture - applying special configuration")
-                # Check for common browser locations
-                chromium_paths = [
-                    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-                    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-                    os.path.expanduser("~/Applications/Chromium.app/Contents/MacOS/Chromium"),
-                    os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-                ]
-                
-                for browser_path in chromium_paths:
-                    if os.path.exists(browser_path):
-                        logger.info(f"Using browser at: {browser_path}")
-                        options.binary_location = browser_path
-                        break
-            elif platform.system() == "Linux":
-                logger.info("Detected Linux environment - checking Chrome locations")
-                # Common Chrome locations on Linux
-                linux_chrome_paths = [
-                    "/usr/bin/google-chrome-stable",
-                    "/usr/bin/google-chrome",
-                    "/usr/bin/chromium-browser",
-                    "/usr/bin/chromium",
-                    "/usr/bin/chrome",
-                    "/opt/google/chrome/chrome"
-                ]
-                
-                for chrome_path in linux_chrome_paths:
-                    if os.path.exists(chrome_path):
-                        logger.info(f"Using Chrome at: {chrome_path}")
-                        options.binary_location = chrome_path
-                        break
-            
-            # Log what we're doing with binary location
-            if hasattr(options, 'binary_location') and options.binary_location:
-                logger.info(f"Chrome binary location set to: {options.binary_location}")
-            else:
-                logger.info("No specific Chrome binary set, using system default")
-            
-            # Initialize undetected ChromeDriver with special handling for Render
-            if is_render:
-                logger.info("Using custom driver initialization for Render")
-                self.driver = uc.Chrome(
-                    options=options,
-                    version_main=None,
-                    use_subprocess=True,
-                    driver_executable_path=None  # Let it auto-detect
-                )
-            else:
-                self.driver = uc.Chrome(
-                    options=options,
-                    version_main=None,
-                    use_subprocess=True
-                )
-            
-            # Set the window size explicitly
-            self.driver.set_window_size(1920, 1080)
-            
-            # Make detection harder by modifying navigator properties
-            self.driver.execute_script("""
-                // Hide WebDriver property
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-                
-                // Add plugins array to seem more like a real browser
-                Object.defineProperty(navigator, 'plugins', {
-                    get: function() {
-                        return [
-                            {description: "PDF Viewer", filename: "internal-pdf-viewer", name: "Chrome PDF Viewer"},
-                            {description: "Chrome PDF Viewer", filename: "internal-pdf-viewer", name: "Chrome PDF Viewer"},
-                            {description: "Portable Document Format", filename: "internal-pdf-viewer", name: "Chrome PDF Plugin"}
-                        ];
-                    }
-                });
-            """)
-            
-            logger.info("Undetected ChromeDriver initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Undetected ChromeDriver: {e}")
-            sys.exit(1)
-    
     def random_delay(self, min_sec=0.1, max_sec=0.2):
         """Add a minimal random delay between actions - ultra minimal but still avoiding detection."""
         delay = random.uniform(min_sec, max_sec)
@@ -651,10 +537,13 @@ class LandcheckerScraper:
             return None
     
     def close(self):
-        """Close the WebDriver."""
-        if hasattr(self, 'driver'):
-            self.driver.quit()
-            logger.info("WebDriver closed")
+        """Close the browser and release resources."""
+        if hasattr(self, 'driver') and self.driver:
+            try:
+                self.driver.quit()
+                logger.info("Browser closed successfully")
+            except Exception as e:
+                logger.error(f"Error closing browser: {e}")
 
 
 def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Landchecker 2025", headless=False):
