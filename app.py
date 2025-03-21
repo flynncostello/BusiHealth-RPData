@@ -63,7 +63,7 @@ def process():
     max_floor_area = data.get('max_floor_area', 'Max')
     
     # Always use headless mode for production, but can set to False for debug
-    headless = True
+    headless = False
     
     # Set property types to both Business and Commercial as specified
     property_types = ["Business", "Commercial"]
@@ -329,9 +329,16 @@ if __name__ == '__main__':
     logger.info(f"Current working directory: {os.getcwd()}")
     logger.info(f"Python executable: {os.path.abspath(os.__file__)}")
     
+    # LOCAL DEVELOPMENT SETUP
+    app.run(debug=True)
+
+    '''
+    # USE WHEN RUNNING ONLINE SUCH AS RENDER
+
     # Get port from environment variable (Render sets this)
     port = int(os.environ.get("PORT", 10000))
     
     # Run the app with the right host and port
     # Use 0.0.0.0 to bind to all interfaces so Render can connect to it
     app.run(host="0.0.0.0", port=port, debug=True)
+    '''
