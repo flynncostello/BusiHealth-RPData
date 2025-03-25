@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Chrome utilities for web scraping with undetected-chromedriver on Render
+# Chrome utilities for web scraping with undetected-chromedriver - Final Fix
 
 import os
 import sys
@@ -11,14 +11,15 @@ import undetected_chromedriver as uc
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.chrome.options import Options
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def setup_chrome_driver(headless=True, download_dir=None):
+def setup_chrome_driver(headless=False, download_dir=None):
     """
-    Set up and return an Undetected ChromeDriver instance optimized for Render environments.
+    Set up and return an Undetected ChromeDriver instance optimized for WebGL support.
     
     Args:
         headless (bool): Whether to run Chrome in headless mode
@@ -28,93 +29,62 @@ def setup_chrome_driver(headless=True, download_dir=None):
         driver: Configured undetected_chromedriver instance
     """
     try:
-        logger.info("Setting up Undetected ChromeDriver for Render...")
+        logger.info("Setting up Chrome driver with WebGL support...")
         
-        # Configure Chrome options
+        # Configure Chrome options - IMPORTANT: Use standard Options for maximum compatibility
         options = uc.ChromeOptions()
         
-        # Add headless mode - always use new headless
+        # Essential flags to enable WebGL
+        options.add_argument("--ignore-gpu-blocklist")
+        options.add_argument("--enable-gpu-rasterization")
+        options.add_argument("--enable-webgl")
+        
+        # Basic browser settings
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        
+        # Set window size
+        options.add_argument("--window-size=1920,1080")
+        
+        # Only use headless if absolutely necessary (it often breaks WebGL)
         if headless:
             options.add_argument("--headless=new")
+            options.add_argument("--disable-gpu")
+            logger.warning("Headless mode may cause WebGL and element detection issues")
         
-        # Add common options required for Render
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")  # Critical for Render
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-gpu")
+        # Add prefs for hardware acceleration
+        prefs = {
+            "hardware_acceleration_mode.enabled": True
+        }
         
-        # Set a realistic user agent
-        user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-        options.add_argument(f'user-agent={user_agent}')
-        
-        # Set download preferences if specified
+        # Add download preferences if specified
         if download_dir:
             os.makedirs(download_dir, exist_ok=True)
-            prefs = {
+            prefs.update({
                 "download.default_directory": download_dir,
                 "download.prompt_for_download": False,
                 "download.directory_upgrade": True,
                 "safebrowsing.enabled": True
-            }
-            options.add_experimental_option("prefs", prefs)
+            })
         
-        # Find Chrome binary - search in this priority order:
+        options.add_experimental_option("prefs", prefs)
         
-        # 1. Check environment variable (set in build.sh)
-        chrome_binary = os.getenv("CHROME_BINARY_PATH")
-        if chrome_binary and os.path.exists(chrome_binary) and os.access(chrome_binary, os.X_OK):
-            logger.info(f"Using Chrome binary from environment variable: {chrome_binary}")
-        else:
-            # 2. Check common locations on Render
-            render_chrome_paths = [
-                "/opt/render/project/.render/chrome/opt/google/chrome/chrome",  # Our build.sh location
-                "/opt/render/project/bin/chrome",  # Symlink created in build.sh
-                "/usr/bin/chrome",  # Another possible symlink
-                "/usr/bin/google-chrome-stable",
-                "/usr/bin/google-chrome",
-                "/opt/google/chrome/chrome",
-                "/usr/bin/chromium-browser"
-            ]
-            
-            # Find the first valid Chrome binary
-            chrome_binary = None
-            for path in render_chrome_paths:
-                if os.path.exists(path) and os.access(path, os.X_OK):
-                    chrome_binary = path
-                    logger.info(f"Found valid Chrome binary at: {chrome_binary}")
-                    break
-            
-            # If still not found and we're on macOS (local development)
-            if chrome_binary is None and platform.system() == "Darwin":
-                mac_path = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-                if os.path.exists(mac_path):
-                    chrome_binary = mac_path
-                    logger.info(f"Using macOS Chrome at: {chrome_binary}")
-        
-        # Only set binary_location if we found a valid binary
-        # This prevents "Binary Location Must be a String" error
-        if chrome_binary:
-            options.binary_location = chrome_binary
-            logger.info(f"Setting Chrome binary location to: {chrome_binary}")
-        else:
-            logger.warning("No valid Chrome binary found! Will attempt to use system default.")
-            # We intentionally DON'T set options.binary_location here to avoid errors
-        
-        # Initialize the driver
+        # Initialize the driver with basic settings
         logger.info("Initializing undetected_chromedriver...")
         driver = uc.Chrome(
             options=options,
             version_main=None,  # Auto-detect Chrome version
-            use_subprocess=True,
-            headless=headless,  # Explicit headless parameter
-            no_sandbox=True     # Required for Render
+            use_subprocess=True
         )
         
-        # Set window size explicitly
-        driver.set_window_size(1920, 1080)
+        # Set window size or maximize
+        if not headless:
+            driver.maximize_window()
+        else:
+            driver.set_window_size(1920, 1080)
         
-        # Make detection harder by modifying navigator properties
+        # Apply anti-detection methods
         driver.execute_script("""
             // Hide WebDriver property
             Object.defineProperty(navigator, 'webdriver', {
@@ -133,18 +103,17 @@ def setup_chrome_driver(headless=True, download_dir=None):
             });
         """)
         
-        logger.info("Undetected ChromeDriver initialized successfully")
+        logger.info("Chrome WebDriver initialized successfully")
         return driver
         
     except Exception as e:
-        logger.error(f"Failed to initialize Undetected ChromeDriver: {e}")
-        # Print traceback for debugging
+        logger.error(f"Failed to initialize Chrome WebDriver: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
 
 # Helper function for waiting with randomized delays
-def random_wait(min_seconds=1, max_seconds=3):
+def random_wait(min_seconds=0.5, max_seconds=2):
     """Wait for a random time interval within the specified range."""
     wait_time = min_seconds + random.random() * (max_seconds - min_seconds)
     time.sleep(wait_time)
