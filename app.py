@@ -63,7 +63,7 @@ def process():
     max_floor_area = data.get('max_floor_area', 'Max')
     
     # Always use headless mode for production, but can set to False for debug
-    headless = False
+    headless = False#True
     
     # Set property types to both Business and Commercial as specified
     property_types = ["Business", "Commercial"]
