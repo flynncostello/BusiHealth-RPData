@@ -622,9 +622,8 @@ def format_zonings_dict(zonings_dict):
 if __name__ == "__main__":
     # List of addresses to search
     test_addresses = [
-        "218 WEST STREET, CROWS NEST, NSW, 2065",
-        "20 BURLINGTON STREET, CROWS NEST, NSW, 2065",
-        "GROUND FLOOR/23 WILLOUGHBY ROAD, CROWS NEST, NSW, 2065"
+        "4/79 ERCEG ROAD, YANGEBUP, WA",
+        "1/51 ERCEG ROAD, YANGEBUP, WA",
     ]
     
     # Get zoning information for all addresses

@@ -43,21 +43,6 @@ def process():
     locations_str = data.get('locations', '')
     locations = [loc.strip() for loc in locations_str.split(',') if loc.strip()]
     
-    # Format locations properly - ensure they contain NSW before postal code
-    formatted_locations = []
-    for loc in locations:
-        if "NSW" not in loc and len(loc.split()) >= 2 and loc.split()[-1].isdigit():
-            # Insert NSW before the last part (postal code)
-            parts = loc.split()
-            parts.insert(-1, "NSW")
-            formatted_loc = " ".join(parts)
-            formatted_locations.append(formatted_loc)
-        else:
-            formatted_locations.append(loc)
-    
-    logger.info(f"Original locations: {locations}")
-    logger.info(f"Formatted locations: {formatted_locations}")
-    
     # Get floor area values
     min_floor_area = data.get('min_floor_area', 'Min')
     max_floor_area = data.get('max_floor_area', 'Max')
@@ -83,7 +68,7 @@ def process():
     # Run the job in a background thread
     thread = threading.Thread(
         target=run_job,
-        args=(job_id, formatted_locations, property_types, min_floor_area, max_floor_area, business_type, headless)
+        args=(job_id, locations, property_types, min_floor_area, max_floor_area, business_type, headless)
     )
     thread.daemon = True
     thread.start()
@@ -320,6 +305,10 @@ def test_download():
     """
 
 if __name__ == '__main__':
+    #from rpdata_scraper.check_zoning_use import check_zoning_use
+    #check_zoning_use(None, None)
+    #quit()
+
     # Make sure necessary directories exist
     os.makedirs('downloads', exist_ok=True)
     os.makedirs('merged_properties', exist_ok=True)

@@ -10,6 +10,44 @@ from openpyxl import load_workbook
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def get_absolute_file_path(relative_filename):
+    """
+    Resolve the absolute path of a file, searching in multiple potential locations.
+    
+    Args:
+        relative_filename (str): Filename to locate
+    
+    Returns:
+        str: Absolute path to the file, or None if not found
+    """
+    # Potential search paths
+    search_paths = [
+        # Current working directory
+        os.getcwd(),
+        
+        # Directory of the current script
+        os.path.dirname(os.path.abspath(__file__)),
+        
+        # Parent directory of current script
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        
+        # Specific for your project structure
+        os.path.join(os.getcwd(), 'rpdata_scraper'),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'rpdata_scraper')
+    ]
+    
+    # Add any additional paths you want to search
+    
+    for path in search_paths:
+        full_path = os.path.join(path, relative_filename)
+        if os.path.exists(full_path):
+            logging.info(f"File found at: {full_path}")
+            return full_path
+    
+    # If file not found in any location
+    logging.error(f"File not found: {relative_filename}")
+    return None
+
 def check_zoning_use(all_rows, business_type):
     """
     Determine if properties' zoning allows the specified business type.
@@ -24,16 +62,22 @@ def check_zoning_use(all_rows, business_type):
     logger.info("===== CHECKING ZONING ALLOWANCES FOR BUSINESS TYPE: %s =====", business_type)
     
     # Reference file path
-    zoning_table_file = "Allowable Use in the Zone - TABLE.xlsx"
+    zoning_table_file = get_absolute_file_path("Allowable Use in the Zone - TABLE.xlsx")
     
-    if not os.path.exists(zoning_table_file):
-        logger.error(f"Zoning table file not found: {zoning_table_file}")
-        return all_rows
+    if not zoning_table_file:
+        logging.error("Could not locate zoning table file")
+        return None
     
     try:
         # Load the zoning reference table using openpyxl to handle empty cells better
         logger.info(f"Loading zoning reference table from: {zoning_table_file}")
         wb = load_workbook(zoning_table_file)
+
+        print("Workbook Details:")
+        print(f"Workbook Title: {zoning_table_file}")
+        print(f"Number of Sheets: {len(wb.sheetnames)}")
+        print("Sheet Names:", wb.sheetnames)
+
         ws = wb.active
         
         # Determine which column to use based on business_type
