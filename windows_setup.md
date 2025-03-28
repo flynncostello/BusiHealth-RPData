@@ -8,16 +8,10 @@
 5. Click "Yes" if a User Account Control prompt appears
 
 ## Step 2: Install Git (if not already installed)
-1. Check if Git is installed by typing:
-   ```
-   git --version
-   ```
-
-2. If you see a version number, proceed to Step 3
-3. If not, install Git by typing:
    ```
    winget install --id Git.Git -e --source winget
    ```
+   * Close and open a new terminal
    
 4. After installation completes, close the Command Prompt window and open a new one as administrator (repeat Step 1)
 
@@ -26,6 +20,7 @@
    ```
    cd %USERPROFILE%\Desktop
    ```
+   * Or open the desktop window and copy the path at the top (right-click and copy)
 
 2. Clone the repository:
    ```
@@ -39,10 +34,21 @@
 cd %USERPROFILE%\Desktop\BusiHealth-RPData
 ```
 
+## Step 4.5: Install Python
+Go to windows app store an install python 3.10 (DON'T NEED TO DO AS THE BUILD SCRIPT INSTALLS IT)
+
+
 ## Step 5: Run the Setup Script
 ```
 build_local_windows.bat
 ```
+
+* Now you can go into the folder and double click the run_app.bat --> Will open in chrome 
+
+
+
+
+
 
 During this process:
 - You may see several windows pop up as Python and Chrome are installed
@@ -67,6 +73,8 @@ Or, more simply, double-click the `run_app.bat` file that was created during set
    http://localhost:5000
    ```
    (If you see an error, try port 8080 instead: `http://localhost:8080`)
+
+   Run data - 'Hunters Hill NSW 2110, Crows Nest NSW 2065'
 
 3. The BusiHealth RPData application should now be displayed in your browser
 

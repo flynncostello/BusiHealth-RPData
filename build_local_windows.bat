@@ -1,129 +1,10 @@
 @echo off
 :: BusiHealth RPData Setup Script for Windows
-:: Fixed version to handle Python not found errors
+:: Assumes Python and Chrome are already installed
 
 echo ================================================
 echo  BusiHealth RPData Setup - Windows Installation
 echo ================================================
-echo.
-
-:: Define Python installer location and Python path variables
-set PYTHON_INSTALLER=python-3.10.11-amd64.exe
-set PYTHONPATH=
-
-:: First check if Python is in PATH
-echo Checking for Python installation...
-where python >nul 2>&1
-if %errorlevel% equ 0 (
-    for /f "tokens=*" %%i in ('where python') do set PYTHONPATH=%%i
-    echo Found Python at: %PYTHONPATH%
-) else (
-    echo Python not found in PATH.
-    
-    :: Check common installation locations
-    if exist "C:\Python310\python.exe" (
-        set PYTHONPATH=C:\Python310\python.exe
-        echo Found Python at: %PYTHONPATH%
-    ) else if exist "C:\Program Files\Python310\python.exe" (
-        set PYTHONPATH=C:\Program Files\Python310\python.exe
-        echo Found Python at: %PYTHONPATH%
-    ) else if exist "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python310\python.exe" (
-        set PYTHONPATH=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python310\python.exe
-        echo Found Python at: %PYTHONPATH%
-    ) else (
-        echo Python installation not found. Will install now.
-        
-        :: Download Python installer
-        echo Downloading Python installer...
-        if not exist %PYTHON_INSTALLER% (
-            echo Downloading from python.org...
-            powershell -Command "(New-Object Net.WebClient).DownloadFile('https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe', '%PYTHON_INSTALLER%')"
-            
-            if not exist %PYTHON_INSTALLER% (
-                echo Failed to download Python installer.
-                echo.
-                echo MANUAL STEPS REQUIRED:
-                echo 1. Download Python 3.10 from https://www.python.org/downloads/release/python-31011/
-                echo 2. Run the installer and CHECK "Add Python 3.10 to PATH"
-                echo 3. Restart your computer
-                echo 4. Run this setup script again
-                echo.
-                goto error_exit
-            )
-        )
-        
-        :: Install Python with explicit PATH option
-        echo.
-        echo Installing Python 3.10...
-        echo *** IMPORTANT: If an installer window appears, CHECK "Add Python to PATH" ***
-        echo.
-        start /wait "" %PYTHON_INSTALLER% /passive InstallAllUsers=1 PrependPath=1 Include_test=0
-        
-        :: After installation, find the Python executable
-        if exist "C:\Python310\python.exe" (
-            set PYTHONPATH=C:\Python310\python.exe
-        ) else if exist "C:\Program Files\Python310\python.exe" (
-            set PYTHONPATH=C:\Program Files\Python310\python.exe
-        ) else if exist "C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python310\python.exe" (
-            set PYTHONPATH=C:\Users\%USERNAME%\AppData\Local\Programs\Python\Python310\python.exe
-        ) else (
-            echo.
-            echo Python was installed but we cannot find the executable.
-            echo You may need to restart your computer for PATH changes to take effect.
-            echo.
-            echo MANUAL STEPS:
-            echo 1. Restart your computer
-            echo 2. Run this setup script again
-            echo.
-            goto error_exit
-        )
-    )
-)
-
-:: At this point, PYTHONPATH should contain the path to python.exe
-echo Using Python at: %PYTHONPATH%
-echo.
-
-:: Download Chrome if not installed
-echo Checking for Chrome installation...
-if not exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
-    if not exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" (
-        echo Chrome not found. Downloading Chrome installer...
-        
-        if not exist chrome_installer.exe (
-            powershell -Command "(New-Object Net.WebClient).DownloadFile('https://dl.google.com/chrome/install/latest/chrome_installer.exe', 'chrome_installer.exe')"
-            
-            if not exist chrome_installer.exe (
-                echo Failed to download Chrome installer.
-                echo.
-                echo MANUAL STEPS REQUIRED:
-                echo 1. Download Chrome from https://www.google.com/chrome/
-                echo 2. Install Chrome
-                echo 3. Run this setup script again
-                echo.
-                goto error_exit
-            )
-        )
-        
-        echo Installing Google Chrome...
-        start /wait "" chrome_installer.exe /silent /install
-        
-        :: Verify Chrome installation
-        if not exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" (
-            if not exist "%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe" (
-                echo Chrome installation may have failed.
-                echo.
-                echo MANUAL STEPS REQUIRED:
-                echo 1. Download Chrome from https://www.google.com/chrome/
-                echo 2. Install Chrome manually
-                echo 3. Run this setup script again
-                echo.
-                goto error_exit
-            )
-        )
-    )
-)
-echo Chrome is installed.
 echo.
 
 :: Create required directories if they don't exist
@@ -147,21 +28,21 @@ if exist venv (
     rmdir /s /q venv
 )
 
-"%PYTHONPATH%" -m venv venv
+python -m venv venv
 if %errorlevel% neq 0 (
     echo Failed to create virtual environment with venv module.
     echo Trying alternative method with virtualenv...
     
-    "%PYTHONPATH%" -m pip install virtualenv
-    "%PYTHONPATH%" -m virtualenv venv
+    python -m pip install virtualenv
+    python -m virtualenv venv
     
     if %errorlevel% neq 0 (
         echo Failed to create virtual environment.
         echo.
         echo MANUAL STEPS REQUIRED:
         echo 1. Open a new Command Prompt
-        echo 2. Run: "%PYTHONPATH%" -m pip install virtualenv
-        echo 3. Run: "%PYTHONPATH%" -m virtualenv venv
+        echo 2. Run: python -m pip install virtualenv
+        echo 3. Run: python -m virtualenv venv
         echo 4. If those commands succeed, run this script again
         echo.
         goto error_exit

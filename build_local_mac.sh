@@ -1,37 +1,11 @@
 #!/bin/bash
-# RPData Scraper Setup Script for macOS - Installs everything from scratch
+# RPData Scraper Setup Script for macOS
 
 # Show commands as they execute
 set -x
 
 # macOS setup
 echo "Setting up on macOS..."
-
-# Install Homebrew if not installed
-if ! command -v brew &>/dev/null; then
-    echo "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    
-    # Add Homebrew to PATH for Apple Silicon or Intel Macs
-    if [[ $(uname -m) == "arm64" ]]; then
-        # For M1/M2/M3 Macs
-        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zshrc
-        eval "$(/opt/homebrew/bin/brew shellenv)"
-    else
-        # For Intel Macs
-        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.bash_profile
-        eval "$(/usr/local/bin/brew shellenv)"
-    fi
-fi
-
-# Install Python if needed
-brew install python
-
-# Check if Chrome is installed
-if [ ! -d "/Applications/Google Chrome.app" ]; then
-    echo "Installing Google Chrome..."
-    brew install --cask google-chrome
-fi
 
 # Set permissions for existing directories
 chmod -R 777 downloads merged_properties tmp

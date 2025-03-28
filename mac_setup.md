@@ -5,6 +5,13 @@
 2. Type "Terminal" and press Enter
 3. A Terminal window will open
 
+## Step 1.5: Install Homebrew and Git
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && \
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile && \
+eval "$(/opt/homebrew/bin/brew shellenv)" && \
+brew install git && \
+git --version
+
 ## Step 2: Clone the Repository to Your Desktop
 1. In Terminal, type the following commands exactly as shown:
 
