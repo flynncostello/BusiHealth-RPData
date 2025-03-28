@@ -43,9 +43,6 @@ else
     fi
 fi
 
-# Create directories
-mkdir -p downloads merged_properties tmp
-chmod -R 777 downloads merged_properties tmp
 
 # Create Python virtual environment
 python3 -m venv venv
@@ -55,7 +52,7 @@ source venv/bin/activate
 pip install --upgrade pip
 
 # Install Python packages
-pip install flask flask-cors selenium undetected-chromedriver>=3.0.0 pandas requests openpyxl lxml werkzeug
+pip install flask flask-cors selenium undetected-chromedriver pandas requests openpyxl lxml werkzeug
 
 # Install packages from requirements.txt if it exists
 if [ -f "requirements.txt" ]; then
