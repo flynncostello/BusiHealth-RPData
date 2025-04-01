@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const errorContainer = document.getElementById('error-container');
     const errorMessage = document.getElementById('error-message');
     const resetBtn = document.getElementById('resetBtn');
+    const locationsInput = document.getElementById('locations');
     
     // Create modal instance
     const confirmModal = new bootstrap.Modal(document.getElementById('confirmationModal'));
@@ -19,9 +20,103 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentJobId = null;
     let statusInterval = null;
     
-    // Form submission
+    // Function to validate locations input
+    function validateLocations(locationsText) {
+        if (!locationsText.trim()) {
+            return { isValid: false, message: "Please enter at least one location." };
+        }
+        
+        const locations = locationsText.split(',').map(loc => loc.trim());
+        const validStates = ['NSW', 'QLD', 'VIC', 'TAS', 'WA', 'SA', 'ACT', 'NT'];
+        
+        for (let i = 0; i < locations.length; i++) {
+            const location = locations[i];
+            const parts = location.split(' ');
+            
+            // Check if we have at least 3 parts (suburb, state, postcode)
+            if (parts.length < 3) {
+                return { 
+                    isValid: false, 
+                    message: `Location "${location}" is invalid. Format should be "Suburb State Postcode".` 
+                };
+            }
+            
+            // The last part should be the postcode
+            const postcode = parts[parts.length - 1];
+            // The second last part should be the state
+            const state = parts[parts.length - 2];
+            // Everything else is the suburb
+            const suburb = parts.slice(0, parts.length - 2).join(' ');
+            
+            // Check if postcode is a 4-digit number
+            if (!/^\d{4}$/.test(postcode)) {
+                return { 
+                    isValid: false, 
+                    message: `Invalid postcode "${postcode}" in "${location}". Postcode must be a 4-digit number.` 
+                };
+            }
+
+            // Check if state is valid
+            if (!validStates.includes(state)) {
+                return { 
+                    isValid: false, 
+                    message: `Invalid state "${state}" in "${location}". State must be one of: NSW, QLD, VIC, TAS, WA, SA, ACT, NT.` 
+                };
+            }
+
+            // Check if suburb is present
+            if (!suburb) {
+                return { 
+                    isValid: false, 
+                    message: `Missing suburb in "${location}". Format should be "Suburb State Postcode".` 
+                };
+            }
+            
+        }
+        
+        return { isValid: true };
+    }
+    
+    // Function to show location validation error message
+    function showLocationError(message) {
+        // Create or update error message element
+        let errorElement = document.getElementById('locations-error');
+        if (!errorElement) {
+            errorElement = document.createElement('div');
+            errorElement.id = 'locations-error';
+            errorElement.className = 'alert alert-danger mt-2';
+            locationsInput.parentNode.appendChild(errorElement);
+        }
+        
+        errorElement.textContent = message;
+        
+        // Highlight the input
+        locationsInput.classList.add('is-invalid');
+        
+        // Remove error after user starts typing again
+        locationsInput.addEventListener('input', function() {
+            const errorElement = document.getElementById('locations-error');
+            if (errorElement) {
+                errorElement.remove();
+            }
+            locationsInput.classList.remove('is-invalid');
+        }, { once: true });
+    }
+    
+    // Form submission with validation
     searchForm.addEventListener('submit', function(e) {
         e.preventDefault();
+        
+        // Validate locations
+        const locationsValidation = validateLocations(locationsInput.value);
+        
+        if (!locationsValidation.isValid) {
+            // Show error message
+            showLocationError(locationsValidation.message);
+            return;
+        }
+        
+        // If validation passes, show confirmation modal
         confirmModal.show();
     });
     
@@ -126,6 +221,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // Hide download and error containers
         downloadContainer.classList.add('d-none');
         errorContainer.classList.add('d-none');
+        
+        // Clear any location validation errors
+        const errorElement = document.getElementById('locations-error');
+        if (errorElement) {
+            errorElement.remove();
+        }
+        locationsInput.classList.remove('is-invalid');
         
         // Reset form
         searchForm.reset();

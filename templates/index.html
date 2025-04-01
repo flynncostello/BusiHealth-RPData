@@ -29,8 +29,9 @@
                             <label for="locations" class="form-label">Locations</label>
                             <textarea class="form-control" id="locations" name="locations" rows="3" required placeholder="Hunters Hill NSW 2110, Crows Nest NSW 2065"></textarea>
                             <div class="form-text">
-                                Enter locations in the format "Suburb State Zip" (e.g., "Hunters Hill NSW 2110").
-                                Separate multiple locations with commas.
+                                Enter locations in the format "Suburb State Postcode" (e.g., "Hunters Hill NSW 2110").
+                                Separate multiple locations with commas. State must be one of: NSW, QLD, VIC, TAS, WA, SA, ACT, NT.
+                                Postcode must be a 4-digit number. MAKE SURE TO CHECK YOUR SUBURBS ARE SPELT CORRECTLY BEFORE SUBMITTING!
                             </div>
                         </div>
                         
@@ -78,7 +79,7 @@
                         </div>
                         
                         <div class="alert alert-info">
-                            <strong>Please Note:</strong> Processing may take approximately 4-8 minutes to complete. Also by default the business type has been set to Business and Commercial ONLY. Also note as this is currently still under development DO NOT RUN MULTIPLE SEARCHES AT THE SAME TIME. Also once excel file is being generated press 'Reset' button to cancel and come back to main page.
+                            <strong>Please Note:</strong> The Property Type has been set to 'Business' and 'Commercial' by default. Scrape will take approximately 4-7 minutes to complete.
                         </div>
                         
                         <button type="submit" class="btn btn-primary btn-lg">Generate Excel File</button>

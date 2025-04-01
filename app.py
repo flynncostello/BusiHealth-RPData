@@ -94,6 +94,11 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area, b
             headless=headless,
             progress_callback=progress_callback
         )
+
+        if result == 'No files downloaded':
+            logger.error("No files downloaded during scraping")
+            update_job_status(job_id, 'error', 0, 'No results found. Please check your search criteria.')
+            return
         
         # Check if processing was successful
         if result:

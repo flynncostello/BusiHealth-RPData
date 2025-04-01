@@ -82,7 +82,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         
         if not result_files:
             logger.error("No files were downloaded during scraping")
-            return None
+            return 'No files downloaded'
         
 
         logger.info(f"Downloaded files: {result_files}")
