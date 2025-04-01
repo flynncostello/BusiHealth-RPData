@@ -360,7 +360,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             # Additional blank columns
             "Comments Y=Recommended, E=Evaluating, R=Rejected", "Date Added", "Date Presented",
             "Allowable Use in Zone (T/F)", "$/m²", "Available (T/F)", "Suitable (T/F)",
-            "PUT IN REPORT (T/F)", "Client Feedback"
+            "PUT IN REPORT (T/F)", "Client Feedback", "Busi's Comment"
         ]
         
         # Add headers to the first row
