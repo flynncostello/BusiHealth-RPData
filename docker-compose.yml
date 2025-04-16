@@ -1,0 +1,14 @@
+version: '3'
+
+services:
+  rpdata-scraper:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./downloads:/app/downloads
+      - ./merged_properties:/app/merged_properties
+      - ./tmp:/app/tmp
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_DEBUG=1

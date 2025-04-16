@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPData Excel File Generator</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="container py-5">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h1 class="mb-0">RPData Excel File Generator</h1>
+                <button id="resetBtn" class="btn btn-sm btn-outline-light mt-2">Reset</button>
+            </div>
+            <div class="card-body">
+                <div id="form-container">
+                    <form id="search-form">
+                        <div class="mb-3">
+                            <label for="business_type" class="form-label">Business Type</label>
+                            <select class="form-select" id="business_type" name="business_type" required>
+                                <option value="Vet">Vet</option>
+                                <option value="Health">Health</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="locations" class="form-label">Locations</label>
+                            <textarea class="form-control" id="locations" name="locations" rows="3" required placeholder="Hunters Hill NSW 2110, Crows Nest NSW 2065"></textarea>
+                            <div class="form-text">
+                                Enter locations in the format "Suburb State Postcode" (e.g., "Hunters Hill NSW 2110").
+                                Separate multiple locations with commas. State must be one of: NSW, QLD, VIC, TAS, WA, SA, ACT, NT.
+                                Postcode must be a 4-digit number. MAKE SURE TO CHECK YOUR SUBURBS ARE SPELT CORRECTLY BEFORE SUBMITTING!
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="min_floor_area" class="form-label">Minimum Floor Area</label>
+                                <select class="form-select" id="min_floor_area" name="min_floor_area">
+                                    <option value="Min">Min</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="300">300</option>
+                                    <option value="400">400</option>
+                                    <option value="500">500</option>
+                                    <option value="600">600</option>
+                                    <option value="700">700</option>
+                                    <option value="800">800</option>
+                                    <option value="900">900</option>
+                                    <option value="1000">1000</option>
+                                    <option value="1250">1250</option>
+                                    <option value="1500">1500</option>
+                                    <option value="1750">1750</option>
+                                    <option value="2000">2000</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="max_floor_area" class="form-label">Maximum Floor Area</label>
+                                <select class="form-select" id="max_floor_area" name="max_floor_area">
+                                    <option value="Max">Max</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="300">300</option>
+                                    <option value="400">400</option>
+                                    <option value="500">500</option>
+                                    <option value="600">600</option>
+                                    <option value="700">700</option>
+                                    <option value="800">800</option>
+                                    <option value="900">900</option>
+                                    <option value="1000">1000</option>
+                                    <option value="1250">1250</option>
+                                    <option value="1500">1500</option>
+                                    <option value="1750">1750</option>
+                                    <option value="2000">2000</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-info">
+                            <strong>Please Note:</strong> The Property Type has been set to 'Business' and 'Commercial' by default. Scrape will take approximately 4-7 minutes to complete.
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary btn-lg">Generate Excel File</button>
+                    </form>
+                </div>
+                
+                <div id="progress-container" class="d-none">
+                    <h4 class="mb-3">Processing Your Request</h4>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" id="progress-bar" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <p id="status-message" class="mb-3">Initializing search...</p>
+                    
+                    <div id="download-container" class="d-none text-center">
+                        <div class="alert alert-success">
+                            <strong>Success!</strong> Your Excel file is ready for download.
+                        </div>
+                        <a id="download-btn" href="#" class="btn btn-success btn-lg mb-3">
+                            <i class="bi bi-download"></i> Download Excel File
+                        </a>
+                    </div>
+                    
+                    <div id="error-container" class="d-none">
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> <span id="error-message"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Confirmation Modal -->
+    <div class="modal fade" id="confirmationModal" tabindex="-1" aria-labelledby="confirmationModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="confirmationModalLabel">Confirm Generation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to generate the Excel file?</p>
+                    <p>This process will take approximately 4-7 minutes to complete.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="confirmBtn">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
