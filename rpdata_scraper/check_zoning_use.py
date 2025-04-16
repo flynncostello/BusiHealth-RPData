@@ -66,7 +66,8 @@ def check_zoning_use(all_rows, business_type):
     
     if not zoning_table_file:
         logging.error("Could not locate zoning table file")
-        return None
+        return all_rows # Return unchanged rows if file not found
+    logger.info(f"Zoning table file located at: {zoning_table_file}")
     
     try:
         # Load the zoning reference table using openpyxl to handle empty cells better

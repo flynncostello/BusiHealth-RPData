@@ -374,137 +374,215 @@ class RPDataScraper(RPDataBase):
             logger.error(f"Error selecting search type: {e}")
             return False
 
-    def search_locations(self, locations):
+    def activate_search_suggestions(self, search_bar):
+        try:
+            # Try typing a single character to trigger suggestions
+            search_bar.send_keys('a')  # or use a very short, generic string
+            self.random_delay(0.5, 0.8)  # wait for suggestions to load
+            
+            # Alternatively, try simulating keyboard events
+            search_bar.send_keys(Keys.DOWN)  # might trigger dropdown
+            
+            logger.info("Attempted to activate search suggestions")
+        except Exception as e:
+            logger.error(f"Error activating search suggestions: {e}")
+
+    def search_locations(self, locations, search_type):
         """Search for the specified locations with improved handling."""
         logger.info(f"===== SEARCHING FOR LOCATIONS: {locations} =====")
         
         try:
-            # For the first location, we use the initial search field
-            if not locations:
-                logger.error("No locations provided")
-                return False
+            # If the search type is "For Sale" or "Sales" we just click on the search bar and pick first dropdown
+            if search_type in ["For Sale", "Sales"]:
+                logger.info(f"Search type is {search_type}, using first dropdown option")
+                # Click on the search bar to activate it
+                search_bar_selectors = [
+                    "//input[contains(@placeholder, 'Search for an address')]",
+                    "//input[contains(@id, 'crux-multi-locality-search')]",
+                    "//div[contains(@class, 'search-bar-container')]//input",
+                    "//div[@id='crux-search-bar']//input",
+                    "//input[contains(@placeholder, 'Search')]",
+                    "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]"
+                ]
                 
-            # Handle first location
-            first_location = locations[0]
-            logger.info(f"Adding first location: {first_location}")
-            
-            # Try multiple search field selectors
-            search_field_selectors = [
-                "//input[contains(@placeholder, 'Search for an address')]",
-                "//input[contains(@id, 'crux-multi-locality-search')]",
-                "//div[contains(@class, 'search-bar-container')]//input",
-                "//div[@id='crux-search-bar']//input",
-                "//input[contains(@placeholder, 'Search')]",
-                "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]"
-            ]
-            
-            search_field = None
-            for selector in search_field_selectors:
-                try:
-                    search_field = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
-                    if search_field:
-                        logger.info(f"Found search field with selector: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not search_field:
-                logger.error("Search field for first location not found")
-                return False
-            
-            # Enter first location - using normal typing speed instead of slow
-            self.human_like_typing(search_field, first_location, "normal")
-            logger.info(f"Entered first location: {first_location}")
-            
-            # Wait for dropdown options to appear
-            self.random_delay(0.5, 0.8)  # Faster wait for dropdown
-            
-            # Try different selectors for the dropdown option
-            dropdown_selectors = [
-                "//li[contains(@role, 'option') and @data-option-index='0']",
-                "//li[contains(@id, 'crux-multi-locality-search-option-0')]", 
-                "//li[contains(@class, 'MuiAutocomplete-option') and @data-option-index='0']",
-                "//li[contains(@class, 'MuiAutocomplete-option')]",
-                "//li[contains(@role, 'option')]"
-            ]
-            
-            first_option = None
-            for selector in dropdown_selectors:
-                try:
-                    first_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
-                    if first_option:
-                        logger.info(f"Found dropdown option with selector: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not first_option:
-                logger.error("No dropdown options found for first location")
-                return False
-            
-            self.safe_click(first_option)
-            logger.info("Selected first location dropdown option")
-            self.random_delay(0.3, 0.5)  # Faster delay
-            
-            # For additional locations, the UI is different
-            if len(locations) > 1:
-                logger.info("Processing additional locations")
-                
-                for location in locations[1:]:
-                    logger.info(f"Adding additional location: {location}")
-                    
-                    # Try to find the additional search field
-                    search_again_selectors = [
-                        "//input[contains(@placeholder, 'Search for a suburb')]",
-                        "//div[contains(@class, 'MuiAutocomplete-root')]//input",
-                        "//div[@data-testid='searchbar']//input",
-                        "//input[contains(@aria-label, 'Search')]",
-                        "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]",
-                        "//input[contains(@placeholder, 'Search')]"
-                    ]
-                    
-                    additional_search = None
-                    for selector in search_again_selectors:
-                        try:
-                            additional_search = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
-                            if additional_search:
-                                logger.info(f"Found additional search field with selector: {selector}")
-                                break
-                        except:
-                            continue
-                    
-                    if not additional_search:
-                        logger.error(f"Could not find search field for additional location: {location}")
-                        # We've added at least one location, so continue with search
-                        break
-                    
-                    # Enter additional location - using normal typing speed
-                    self.human_like_typing(additional_search, location, "normal")
-                    logger.info(f"Entered additional location: {location}")
-                    
-                    # Wait for dropdown to appear
-                    self.random_delay(0.5, 0.8)  # Faster wait for dropdown
-                    
-                    # Try to find and click the first option for this location
-                    additional_option = None
-                    for selector in dropdown_selectors:
-                        try:
-                            additional_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
-                            if additional_option:
-                                logger.info(f"Found dropdown option for additional location with selector: {selector}")
-                                break
-                        except:
-                            continue
-                    
-                    if not additional_option:
-                        logger.warning(f"Could not find dropdown option for: {location}")
-                        # Try to continue anyway
+                search_bar = None
+                for selector in search_bar_selectors:
+                    try:
+                        search_bar = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
+                        if search_bar:
+                            logger.info(f"Found search bar with selector: {selector}")
+                            break
+                    except:
                         continue
-                    
-                    self.safe_click(additional_option)
-                    logger.info(f"Selected option for additional location: {location}")
-                    self.random_delay(0.3, 0.5)  # Faster delay
+                
+                if not search_bar:
+                    logger.error("Search bar not found")
+                    return False
+                
+                # Click on the search bar to activate it
+                self.safe_click(search_bar)
+                logger.info("Clicked on search bar")
+
+                # Attempt to activate suggestions
+                self.activate_search_suggestions(search_bar)
+                
+                # Wait for dropdown to appear
+                self.random_delay(0.5, 0.8)
+                
+                # Try different selectors for the dropdown option
+                dropdown_selectors = [
+                    "//li[contains(@role, 'option') and @data-option-index='0']",
+                    "//li[contains(@id, 'crux-multi-locality-search-option-0')]", 
+                    "//li[contains(@class, 'MuiAutocomplete-option') and @data-option-index='0']",
+                    "//li[contains(@class, 'MuiAutocomplete-option')]",
+                    "//li[contains(@role, 'option')]"
+                ]
+                
+                first_option = None
+                for selector in dropdown_selectors:
+                    try:
+                        first_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
+                        if first_option:
+                            logger.info(f"Found dropdown option with selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not first_option:
+                    logger.error("No dropdown options found")
+                    return False
+                
+                self.safe_click(first_option)
+                logger.info("Selected first dropdown option")
+                self.random_delay(0.3, 0.5)
             
+            else:
+                # For the first location, we use the initial search field
+                if not locations:
+                    logger.error("No locations provided")
+                    return False
+                    
+                # Handle first location
+                first_location = locations[0]
+                logger.info(f"Adding first location: {first_location}")
+                
+                # Try multiple search field selectors
+                search_field_selectors = [
+                    "//input[contains(@placeholder, 'Search for an address')]",
+                    "//input[contains(@id, 'crux-multi-locality-search')]",
+                    "//div[contains(@class, 'search-bar-container')]//input",
+                    "//div[@id='crux-search-bar']//input",
+                    "//input[contains(@placeholder, 'Search')]",
+                    "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]"
+                ]
+                
+                search_field = None
+                for selector in search_field_selectors:
+                    try:
+                        search_field = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
+                        if search_field:
+                            logger.info(f"Found search field with selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not search_field:
+                    logger.error("Search field for first location not found")
+                    return False
+                
+                # Enter first location - using normal typing speed instead of slow
+                self.human_like_typing(search_field, first_location, "normal")
+                logger.info(f"Entered first location: {first_location}")
+                
+                # Wait for dropdown options to appear
+                self.random_delay(0.5, 0.8)  # Faster wait for dropdown
+                
+                # Try different selectors for the dropdown option
+                dropdown_selectors = [
+                    "//li[contains(@role, 'option') and @data-option-index='0']",
+                    "//li[contains(@id, 'crux-multi-locality-search-option-0')]", 
+                    "//li[contains(@class, 'MuiAutocomplete-option') and @data-option-index='0']",
+                    "//li[contains(@class, 'MuiAutocomplete-option')]",
+                    "//li[contains(@role, 'option')]"
+                ]
+                
+                first_option = None
+                for selector in dropdown_selectors:
+                    try:
+                        first_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
+                        if first_option:
+                            logger.info(f"Found dropdown option with selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not first_option:
+                    logger.error("No dropdown options found for first location")
+                    return False
+                
+                self.safe_click(first_option)
+                logger.info("Selected first location dropdown option")
+                self.random_delay(0.3, 0.5)  # Faster delay
+                
+                # For additional locations, the UI is different
+                if len(locations) > 1:
+                    logger.info("Processing additional locations")
+                    
+                    for location in locations[1:]:
+                        logger.info(f"Adding additional location: {location}")
+                        
+                        # Try to find the additional search field
+                        search_again_selectors = [
+                            "//input[contains(@placeholder, 'Search for a suburb')]",
+                            "//div[contains(@class, 'MuiAutocomplete-root')]//input",
+                            "//div[@data-testid='searchbar']//input",
+                            "//input[contains(@aria-label, 'Search')]",
+                            "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]",
+                            "//input[contains(@placeholder, 'Search')]"
+                        ]
+                        
+                        additional_search = None
+                        for selector in search_again_selectors:
+                            try:
+                                additional_search = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
+                                if additional_search:
+                                    logger.info(f"Found additional search field with selector: {selector}")
+                                    break
+                            except:
+                                continue
+                        
+                        if not additional_search:
+                            logger.error(f"Could not find search field for additional location: {location}")
+                            # We've added at least one location, so continue with search
+                            break
+                        
+                        # Enter additional location - using normal typing speed
+                        self.human_like_typing(additional_search, location, "normal")
+                        logger.info(f"Entered additional location: {location}")
+                        
+                        # Wait for dropdown to appear
+                        self.random_delay(0.5, 0.8)  # Faster wait for dropdown
+                        
+                        # Try to find and click the first option for this location
+                        additional_option = None
+                        for selector in dropdown_selectors:
+                            try:
+                                additional_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=3)
+                                if additional_option:
+                                    logger.info(f"Found dropdown option for additional location with selector: {selector}")
+                                    break
+                            except:
+                                continue
+                        
+                        if not additional_option:
+                            logger.warning(f"Could not find dropdown option for: {location}")
+                            # Try to continue anyway
+                            continue
+                        
+                        self.safe_click(additional_option)
+                        logger.info(f"Selected option for additional location: {location}")
+                        self.random_delay(0.3, 0.5)  # Faster delay
+                
             # Find and click the search button
             search_button_selectors = [
                 "//button[contains(@class, 'search-btn')]",
@@ -572,7 +650,8 @@ class RPDataScraper(RPDataBase):
         except Exception as e:
             logger.error(f"Error searching locations: {e}")
             return False
-    
+
+
     def apply_filters(self, property_types, min_floor_area, max_floor_area):
         """
         Apply filters for property types and floor area.

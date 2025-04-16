@@ -14,9 +14,13 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 # Import required modules from the package
+print("1")
 from scraper.scrape_rpdata import scrape_rpdata
+print("2")
 from merge_excel import process_excel_files
+print("3")
 from clear_folders import clear_folders
+print("4")
 
 # Set up logging
 logging.basicConfig(
@@ -184,6 +188,7 @@ def test_main():
     return result is not None
 
 if __name__ == "__main__":
+    print("Running main() function...")
     # Use actual locations for a real run
     locations = ["Hunters Hill NSW 2110", "Crows Nest NSW 2065"]
     property_types = ["Business", "Commercial"]

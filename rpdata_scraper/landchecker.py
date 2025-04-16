@@ -6,7 +6,7 @@ import random
 import logging
 import platform
 import os
-import sys
+print(1)
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from chrome_utils import setup_chrome_driver
+print(2)
 
 # Set up logging
 logging.basicConfig(
@@ -638,8 +639,8 @@ def test_landchecker():
     
     # Test with a small set of addresses
     test_addresses = [
-        "4/79 ERCEG ROAD, YANGEBUP, WA",
         "1/51 ERCEG ROAD, YANGEBUP, WA",
+        "4/594 INKERMAN ROAD, CAULFIELD NORTH, VIC"
     ]
     
     # Determine headless mode

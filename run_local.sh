@@ -31,7 +31,7 @@ echo "Access the web interface at http://127.0.0.1:5000"
 echo "Press Ctrl+C to stop the server"
 echo "==================================================="
 
-python app.py
+python3 app.py
 
 # This line won't be reached unless the app exits normally
 echo "Application has stopped."

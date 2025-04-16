@@ -63,7 +63,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 continue
             
             # Search for locations
-            if not scraper.search_locations(locations):
+            if not scraper.search_locations(locations, search_type):
                 logger.error(f"Failed to search locations for: {search_type}, skipping")
                 continue
             

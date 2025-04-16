@@ -12,7 +12,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from datetime import datetime
 from collections import Counter
-import time
 
 from landchecker import get_property_zonings  # Import the zoning lookup function
 from check_zoning_use import check_zoning_use  # Import the zoning use checker function
@@ -394,6 +393,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                         # Method 1: Try direct column access
                         if "Open in RPData" in row:
                             rp_data_link = row["Open in RPData"]
+                            logger.info(f"Found hyperlink in 'Open in RPData' column: {rp_data_link}")
                         
                         # Method 2: Look for column with RPData or Link in its name
                         if pd.isna(rp_data_link) or not rp_data_link:
@@ -670,9 +670,9 @@ def test_merge_excel():
     
     # Check if test files exist
     test_files = {
-        "Sales": "downloads/recentSaleExport_test.xlsx",
-        "For Sale": "downloads/forSaleExport_test.xlsx",
-        "For Rent": "downloads/forRentExport_test.xlsx"
+        "Sales": "downloads/recentSaleExport_20250416155932.xlsx",
+        "For Sale": "downloads/forSaleExport_20250416155902.xlsx",
+        "For Rent": "downloads/forRentExport_20250416155834.xlsx"
     }
     
     # Check if at least one test file exists
