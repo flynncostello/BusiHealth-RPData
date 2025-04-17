@@ -45,6 +45,11 @@ os.makedirs('tmp', exist_ok=True)
 # Store running jobs
 jobs = {}
 
+@app.route('/test')
+def test():
+    return "App is running"
+
+
 @app.route('/')
 def index():
     """Render the main page"""
@@ -449,4 +454,4 @@ if __name__ == '__main__':
     host = '0.0.0.0' if is_azure else '127.0.0.1'
     
     logger.info(f"Starting application with debug={debug_mode}, host={host}")
-    app.run(host=host, port=5000, debug=debug_mode)
+    app.run(host=host, port=8000, debug=debug_mode)
