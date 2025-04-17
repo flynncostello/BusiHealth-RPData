@@ -1,26 +1,23 @@
 #!/bin/bash
-# Setup script for RP Data Scraper on Azure
+# Chrome installation for Azure App Service
 
-# Exit on any error
-set -e
+# Log all output
+exec > /home/LogFiles/chrome_setup.log 2>&1
+echo "Chrome setup started: $(date)"
 
-# Print each command for debugging
-set -x
-
-# Install Chrome
-echo "Installing Chrome..."
-curl -sS -o - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
-apt-get -y update
-apt-get -y install google-chrome-stable
-
-# Create necessary directories
+# Create directories
 mkdir -p downloads merged_properties tmp
 
-# Log the Chrome installation and version
-echo "Chrome installed successfully: $(google-chrome --version)"
+# Install Chrome if not present
+if ! command -v google-chrome &> /dev/null; then
+    echo "Installing Chrome..."
+    cd /tmp
+    wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    apt-get update
+    apt-get install -y ./google-chrome-stable_current_amd64.deb || true
+    echo "Chrome installation completed: $(google-chrome --version || echo 'FAILED')"
+else
+    echo "Chrome already installed: $(google-chrome --version)"
+fi
 
-# Log completion
-echo "===================================================" 
-echo "Azure setup complete!" 
-echo "==================================================="
+echo "Setup completed: $(date)"

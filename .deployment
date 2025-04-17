@@ -1,0 +1,2 @@
+[config]
+POST_DEPLOYMENT_ACTION = bash %HOME%\site\wwwroot\setup_azure.sh

@@ -9,6 +9,7 @@ import shutil
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
+import application_startup
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -44,11 +45,6 @@ os.makedirs('tmp', exist_ok=True)
 
 # Store running jobs
 jobs = {}
-
-@app.route('/test')
-def test():
-    return "App is running"
-
 
 @app.route('/')
 def index():
