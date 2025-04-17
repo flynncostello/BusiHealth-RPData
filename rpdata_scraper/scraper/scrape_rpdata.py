@@ -6,7 +6,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from setup_rpdata_scraper import RPDataScraper, logger
 
-def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", headless=False, progress_callback=None):
+def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", 
+                  headless=False, progress_callback=None, download_dir=None):
     """
     Scrape property data from RP Data.
     
@@ -16,6 +17,8 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
         min_floor_area (str): Minimum floor area
         max_floor_area (str): Maximum floor area
         headless (bool): Whether to run in headless mode
+        progress_callback (function): Optional callback for progress updates
+        download_dir (str, optional): Specific download directory for this job
     
     Returns:
         dict: Dictionary with file paths for each search type
@@ -24,13 +27,23 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
     if progress_callback is None:
         def progress_callback(percentage, message):
             pass  # No-op if no callback provided
+    
+    # Default download directory if not specified
+    if download_dir is None:
+        download_dir = os.path.join(os.getcwd(), "downloads")
+    
+    # Ensure download directory exists
+    os.makedirs(download_dir, exist_ok=True)
+    
+    # Set default parameters
     if locations is None:
         locations = []
     
     if property_types is None:
         property_types = ["Business", "Commercial"]
     
-    scraper = RPDataScraper(headless=headless)
+    # Create scraper with specific download directory
+    scraper = RPDataScraper(headless=headless, download_dir=download_dir)
     result_files = {}
     
     try:
@@ -43,17 +56,13 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             scraper.close()
             return result_files
         
-        
         # Process each search type
         search_types = ["For Rent", "For Sale", "Sales"]
 
         progress_callback(16, "Getting each search type data from RP Data...")
 
-
-        i = 0
-        for search_type in search_types:
+        for i, search_type in enumerate(search_types):
             progress_callback(20+i*10, f"Getting results for {search_type} data...")
-            i += 1
 
             logger.info(f"\n===== STARTING SEARCH TYPE: {search_type} =====\n")
             
@@ -116,9 +125,9 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
 if __name__ == "__main__":
     # Example usage
     locations = ["Hunters Hill NSW 2110", "Crows Nest NSW 2065"]
-    property_types = ["Land"]#["Business", "Commercial"]
-    min_floor = "Min" # Can do a number (From 0 - 9999999999, 10 digit num is max, and min <= max otherwise error), or "Min"
-    max_floor = "100" # Can do a number, or "Max"
+    property_types = ["Land"]  # ["Business", "Commercial"]
+    min_floor = "Min"  # Can do a number (From 0 - 9999999999, 10 digit num is max, and min <= max otherwise error), or "Min"
+    max_floor = "100"  # Can do a number, or "Max"
     
     result_files = scrape_rpdata(
         locations=locations,

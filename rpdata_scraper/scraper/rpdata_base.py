@@ -19,10 +19,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class RPDataBase:
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, download_dir=None):
         """Initialize the scraper with Undetected ChromeDriver."""
-        self.download_dir = os.path.join(os.getcwd(), "downloads")
-        os.makedirs(self.download_dir, exist_ok=True)
+        # If no download directory specified, use default
+        if download_dir is None:
+            download_dir = os.path.join(os.getcwd(), "downloads")
+        
+        # Ensure the download directory exists
+        os.makedirs(download_dir, exist_ok=True)
+        
+        self.download_dir = download_dir
         self.driver = setup_chrome_driver(headless=headless, download_dir=self.download_dir)
         self.login_url = "https://rpp.corelogic.com.au/"
     

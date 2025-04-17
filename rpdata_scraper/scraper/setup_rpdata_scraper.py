@@ -1335,6 +1335,10 @@ class RPDataScraper(RPDataBase):
                 logger.error(f"Unknown search type for file prefix: {search_type}")
                 return False
             
+            print(f"Looking for downloaded file with prefix: {prefix}")
+            print(f"Download directory: {self.download_dir}")
+            print(f"Files in the download directory: {os.listdir(self.download_dir)}")
+            
             # Check for downloaded file
             downloaded_files = [f for f in os.listdir(self.download_dir) if f.startswith(prefix)]
             

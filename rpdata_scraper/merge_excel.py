@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # Merges Excel files from RP Data into a single file
-# Integrates with landchecker.py to get zoning information for all properties in a single batch
-# Updated for Docker compatibility - Removed image processing and agent phone dependencies
+# Updated to support job-specific directories for multi-user isolation
 
 import os
 import logging
@@ -12,6 +11,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from datetime import datetime
 from collections import Counter
+import time
 
 from landchecker import get_property_zonings  # Import the zoning lookup function
 from check_zoning_use import check_zoning_use  # Import the zoning use checker function
@@ -80,7 +80,6 @@ def get_hyperlink_from_excel(file_path, sheet_name=0, row_idx=None, column_name=
         
         # Get hyperlinks from cells
         hyperlinks = {}
-        row_offset = 0  # Adjust based on row_idx being 0-based in dataframe
         
         for row_num, row in enumerate(sheet.iter_rows(min_row=header_row+1), header_row+1):
             cell = sheet.cell(row=row_num, column=col_idx)
@@ -166,7 +165,7 @@ def normalize_address(address):
     
     return address.strip()
 
-def generate_filename(locations, property_types, min_floor, max_floor):
+def generate_filename(locations, property_types, min_floor, max_floor, output_dir=None):
     """
     Generate a filename based on search criteria and current date/time.
     
@@ -175,6 +174,7 @@ def generate_filename(locations, property_types, min_floor, max_floor):
         property_types (list): List of property types searched
         min_floor (str): Minimum floor size
         max_floor (str): Maximum floor size
+        output_dir (str): Optional output directory
         
     Returns:
         str: Generated filename
@@ -183,18 +183,22 @@ def generate_filename(locations, property_types, min_floor, max_floor):
     now = datetime.now()
     date_time_str = now.strftime("%d_%m_%Y_%H_%M")
     
-    # Format locations for filename
-    location_str = "_".join([loc.replace(" ", "_").split(",")[0] for loc in locations])
+    # Format locations for filename (use first word of each location)
+    location_str = "_".join([loc.split()[0].replace(",", "") for loc in locations[:2]])
     
-    # Create merged_properties directory if it doesn't exist
-    os.makedirs("merged_properties", exist_ok=True)
+    # Create output directory if it doesn't exist and not provided
+    if output_dir is None:
+        output_dir = "merged_properties"
     
-    # Create filename with merged_properties directory
-    filename = f"merged_properties/Properties_{location_str}_{date_time_str}.xlsx"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create filename with output directory
+    filename = f"{output_dir}/Properties_{location_str}_{date_time_str}.xlsx"
     
     return filename
 
-def process_excel_files(files_dict, locations, property_types, min_floor, max_floor, business_type, headless=False, output_file=None, progress_callback=None):
+def process_excel_files(files_dict, locations, property_types, min_floor, max_floor, business_type, 
+                        headless=False, output_dir=None, output_file=None, progress_callback=None):
     """
     Process and merge RP Data Excel files.
     
@@ -206,7 +210,8 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         max_floor (str): Maximum floor size
         business_type (str): Type of business searched either Vet or Health
         headless (bool): Whether to run in headless mode
-        output_file (str, optional): Path to save the merged Excel file. If None, will be generated.
+        output_dir (str): Job-specific output directory for merged file
+        output_file (str, optional): Specific output file path. If None, will be generated.
         progress_callback (function): Callback function for progress updates
         
     Returns:
@@ -221,7 +226,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     
     # Generate filename if not provided
     if output_file is None:
-        output_file = generate_filename(locations, property_types, min_floor, max_floor)
+        output_file = generate_filename(locations, property_types, min_floor, max_floor, output_dir)
     
     try:
         # Create a new workbook and select the active worksheet
@@ -393,7 +398,6 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                         # Method 1: Try direct column access
                         if "Open in RPData" in row:
                             rp_data_link = row["Open in RPData"]
-                            logger.info(f"Found hyperlink in 'Open in RPData' column: {rp_data_link}")
                         
                         # Method 2: Look for column with RPData or Link in its name
                         if pd.isna(rp_data_link) or not rp_data_link:
@@ -658,21 +662,26 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         logger.error(traceback.format_exc())
         return False
 
-
 # Test function to allow running the module directly for testing
 def test_merge_excel():
-    """Test function for the merge_excel module with minimal data."""
+    """Test function for the merge_excel module with job-specific directories."""
     print("Testing merge_excel module...")
     
-    # Create test directory structure
-    os.makedirs("downloads", exist_ok=True)
-    os.makedirs("merged_properties", exist_ok=True)
+    # Create a test job ID
+    test_job_id = f"test_{int(time.time())}"
     
-    # Check if test files exist
+    # Create job-specific directories
+    job_download_dir = os.path.join("downloads", test_job_id)
+    job_output_dir = os.path.join("merged_properties", test_job_id)
+    
+    os.makedirs(job_download_dir, exist_ok=True)
+    os.makedirs(job_output_dir, exist_ok=True)
+    
+    # Check if test files exist in the job download directory
     test_files = {
-        "Sales": "downloads/recentSaleExport_20250416155932.xlsx",
-        "For Sale": "downloads/forSaleExport_20250416155902.xlsx",
-        "For Rent": "downloads/forRentExport_20250416155834.xlsx"
+        "Sales": os.path.join(job_download_dir, "recentSaleExport_test.xlsx"),
+        "For Sale": os.path.join(job_download_dir, "forSaleExport_test.xlsx"),
+        "For Rent": os.path.join(job_download_dir, "forRentExport_test.xlsx")
     }
     
     # Check if at least one test file exists
@@ -693,7 +702,7 @@ def test_merge_excel():
     max_floor = "1200"
     business_type = "Vet"
     
-    # Run the process
+    # Run the process with job-specific output directory
     result = process_excel_files(
         files_dict=test_files,
         locations=locations,
@@ -701,11 +710,11 @@ def test_merge_excel():
         min_floor=min_floor,
         max_floor=max_floor,
         business_type=business_type,
-        headless=True
+        headless=True,
+        output_dir=job_output_dir
     )
     
     return result
-
 
 if __name__ == "__main__":
     # Run the test function when this script is executed directly

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Main script to run the RP Data scraper and merger
-# Updated for Docker compatibility with improved logging
+# Updated to support job-specific directories for multi-user isolation
 
 import os
 import sys
@@ -14,13 +14,9 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 # Import required modules from the package
-print("1")
 from scraper.scrape_rpdata import scrape_rpdata
-print("2")
 from merge_excel import process_excel_files
-print("3")
 from clear_folders import clear_folders
-print("4")
 
 # Set up logging
 logging.basicConfig(
@@ -34,7 +30,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", 
-         business_type=None, headless=False, progress_callback=None):
+         business_type=None, headless=False, progress_callback=None, 
+         download_dir=None, output_dir=None):
     """
     Main function to scrape RP Data and process the results.
     
@@ -46,6 +43,8 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         business_type (str): Type of business to search for (either Vet or Health)
         headless (bool): Whether to run in headless mode
         progress_callback (function): Optional callback function for progress updates
+        download_dir (str): Job-specific directory for downloads
+        output_dir (str): Job-specific directory for output files
     
     Returns:
         str: Path to the merged Excel file, or None if the process failed
@@ -59,10 +58,22 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
     
     progress_callback(1, "Initializing RP Data scraper...")
 
-    # Check if we're running in Docker - if so, force headless mode
-    is_docker = os.environ.get('RUNNING_IN_DOCKER', 'false').lower() == 'true'
-    if is_docker and not headless:
-        logger.info("Running in Docker, forcing headless mode")
+    # Default download directory if not specified
+    if download_dir is None:
+        download_dir = "downloads"
+    
+    # Default output directory if not specified
+    if output_dir is None:
+        output_dir = "merged_properties"
+        
+    # Ensure directories exist
+    os.makedirs(download_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Check if we're running in Azure App Service - if so, force headless mode
+    is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
+    if is_azure and not headless:
+        logger.info("Running in Azure App Service, forcing headless mode")
         headless = True
 
     # Use default values if parameters are None
@@ -82,13 +93,11 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
     logger.info(f"Floor Area: {min_floor_area} - {max_floor_area}")
     logger.info(f"Business Type: {business_type}")
     logger.info(f"Headless Mode: {headless}")
+    logger.info(f"Download Directory: {download_dir}")
+    logger.info(f"Output Directory: {output_dir}")
     
     try:
-        # First clear all files in the downloads/ and merged_properties/ directories
-        progress_callback(5, "Clearing existing files...")
-        logger.info("Clearing all folders...")
-        clear_folders()
-
+        # No need to clear all folders - we're using job-specific directories now
         # Step 1: Scrape RP Data
         logger.info("\n===== STEP 1: SCRAPING RP DATA =====\n")
         progress_callback(10, "Setting up scraper...")
@@ -99,7 +108,8 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             headless=headless,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            download_dir=download_dir
         )
         
         if not result_files:
@@ -124,7 +134,8 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             max_floor=max_floor_area,
             business_type=business_type,
             headless=headless,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            output_dir=output_dir
         )
         
         end_time = time.time()
@@ -132,22 +143,20 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Total processing time: {elapsed_time:.2f} seconds")
         
         if success:
-            # Get the name of the most recently created file in merged_properties
-            merged_dir = "merged_properties"
-            
-            if os.path.exists(merged_dir) and os.listdir(merged_dir):
-                files = os.listdir(merged_dir)
+            # Get the name of the most recently created file in the output directory
+            if os.path.exists(output_dir) and os.listdir(output_dir):
+                files = os.listdir(output_dir)
                 if files:
                     # Sort by modification time (newest first)
-                    files.sort(key=lambda x: os.path.getmtime(os.path.join(merged_dir, x)), reverse=True)
-                    newest_file = os.path.join(merged_dir, files[0])
+                    files.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
+                    newest_file = os.path.join(output_dir, files[0])
                     logger.info(f"Processing complete. Merged file saved to: {newest_file}")
                     
                     progress_callback(100, f"Processing complete! File saved as {os.path.basename(newest_file)}")
-                    return merged_dir
+                    return output_dir
             
-            logger.info(f"Processing complete. Merged file saved to merged_properties directory.")
-            return "merged_properties"
+            logger.info(f"Processing complete. Merged file saved to output directory: {output_dir}")
+            return output_dir
         else:
             logger.error("Failed to process and merge files")
             progress_callback(100, "Processing failed. Please check logs.")
@@ -169,11 +178,16 @@ def test_main():
     max_floor = "Max"
     business_type = "Vet"
     
-    # Create directories if they don't exist
-    os.makedirs("downloads", exist_ok=True)
-    os.makedirs("merged_properties", exist_ok=True)
+    # Create job-specific directories for test
+    test_job_id = "test_job"
+    test_download_dir = os.path.join("downloads", test_job_id)
+    test_output_dir = os.path.join("merged_properties", test_job_id)
     
-    # Run the main function in test mode
+    # Create directories
+    os.makedirs(test_download_dir, exist_ok=True)
+    os.makedirs(test_output_dir, exist_ok=True)
+    
+    # Run the main function with job-specific directories
     print("Running main() function in test mode...")
     result = main(
         locations=test_locations, 
@@ -181,14 +195,24 @@ def test_main():
         min_floor_area=min_floor,
         max_floor_area=max_floor,
         business_type=business_type,
-        headless=True
+        headless=True,
+        download_dir=test_download_dir,
+        output_dir=test_output_dir
     )
     
     print(f"Test result: {result}")
     return result is not None
 
 if __name__ == "__main__":
-    print("Running main() function...")
+    # Generate a test job ID
+    test_job_id = f"test_{int(time.time())}"
+    test_download_dir = os.path.join("downloads", test_job_id) 
+    test_output_dir = os.path.join("merged_properties", test_job_id)
+    
+    # Create the job directories
+    os.makedirs(test_download_dir, exist_ok=True)
+    os.makedirs(test_output_dir, exist_ok=True)
+    
     # Use actual locations for a real run
     locations = ["Hunters Hill NSW 2110", "Crows Nest NSW 2065"]
     property_types = ["Business", "Commercial"]
@@ -197,17 +221,16 @@ if __name__ == "__main__":
     business_type = "Vet"
     headless = False
     
-    # Create merged_properties directory if it doesn't exist
-    os.makedirs("merged_properties", exist_ok=True)
-    
-    # Run the entire process
+    # Run the entire process with job-specific directories
     output_location = main(
         locations=locations,
         property_types=property_types,
         min_floor_area=min_floor,
         max_floor_area=max_floor,
         business_type=business_type,
-        headless=headless
+        headless=headless,
+        download_dir=test_download_dir,
+        output_dir=test_output_dir
     )
     
     if output_location:
