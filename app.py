@@ -8,6 +8,7 @@ import traceback
 import shutil
 from flask_cors import CORS
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables from .env file if it exists
 load_dotenv()
@@ -18,16 +19,23 @@ from rpdata_scraper.main import main
 app = Flask(__name__)
 CORS(app)  # Enable CORS to fix 403 errors
 
-# Configure logging
+log_dir = os.environ.get('HOME', '') + '/LogFiles'
+os.makedirs(log_dir, exist_ok=True)
+
+# Create timestamped log filename
+log_filename = f"{log_dir}/rpdata_scraper_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+# Configure more detailed logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+    level=logging.DEBUG,  # Changed from INFO to DEBUG for more details
+    format='%(asctime)s - %(levelname)s - %(name)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("rpdata_scraper.log")
+        logging.FileHandler(log_filename)
     ]
 )
 logger = logging.getLogger(__name__)
+
 
 # Ensure necessary directories exist
 os.makedirs('downloads', exist_ok=True)
