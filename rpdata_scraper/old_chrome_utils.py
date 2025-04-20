@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Chrome utilities for web scraping with undetected-chromedriver
-# Optimized for Docker environments
+# Simplified version focusing on reliable file downloads
 
 import os
 import sys
@@ -19,43 +19,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def setup_chrome_driver(headless=True, download_dir=None):
+def setup_chrome_driver(headless=False, download_dir=None):
     """
-    Set up and return an Undetected ChromeDriver instance optimized for Docker environments.
+    Set up and return an Undetected ChromeDriver instance with reliable download handling.
     
     Args:
-        headless (bool): Whether to run Chrome in headless mode (should be True in Docker)
+        headless (bool): Whether to run Chrome in headless mode
         download_dir (str): Directory where downloads should be saved
         
     Returns:
         driver: Configured undetected_chromedriver instance
     """
     try:
-        logger.info("Setting up Chrome driver for Docker environment...")
+        logger.info("Setting up Chrome driver...")
         logger.info(f"Headless mode: {headless}")
         
-        # Detect if we're in a container
-        is_container = os.environ.get('WEBSITE_SITE_NAME') is not None or 'DOCKER_CONTAINER' in os.environ
-        logger.info(f"Running in container: {is_container}")
-        
-        # Configure Chrome options - optimized for Docker
+        # Configure Chrome options
         options = uc.ChromeOptions()
         
-        # Essential options for Docker environment
-        options.add_argument("--no-sandbox")  # Required for Docker
-        options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource issues
-        options.add_argument("--disable-gpu")  # Not needed in headless environments
-        options.add_argument("--disable-setuid-sandbox")  # Additional sandbox security measures
-        options.add_argument("--disable-software-rasterizer")  # Improve performance
-        
-        # Anti-detection options
+        # Basic browser settings
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--window-size=1920,1080")
         
-        # Headless settings
-        # In Docker, we almost always want to run headless
-        if headless or is_container:
+        # Headless-specific settings if needed
+        if headless:
             options.add_argument("--headless=new")
+            options.add_argument("--disable-gpu")
             # Parameters to help with downloads in headless mode
             options.add_argument("--disable-features=IsolateOrigins,site-per-process")
             options.add_argument("--disable-site-isolation-trials")
@@ -72,15 +63,6 @@ def setup_chrome_driver(headless=True, download_dir=None):
             
             # Ensure the download directory exists
             os.makedirs(download_dir, exist_ok=True)
-            
-            # Fix permissions in Docker environment
-            if is_container:
-                try:
-                    # Ensure directory is fully writable
-                    os.chmod(download_dir, 0o777)
-                    logger.info(f"Set permissions on download directory: {download_dir}")
-                except Exception as e:
-                    logger.warning(f"Could not set permissions on download directory: {e}")
             
             # Enhanced download settings for Excel and CSV files
             prefs.update({
@@ -111,6 +93,18 @@ def setup_chrome_driver(headless=True, download_dir=None):
                 "browser.download.manager.useWindow": False,
                 "browser.download.folderList": 2  # 2 means use the custom download directory
             })
+            
+            # Log the download directory details to help with debugging
+            logger.info(f"Configured download directory: {download_dir}")
+            logger.info(f"Directory exists: {os.path.exists(download_dir)}")
+            logger.info(f"Directory is writable: {os.access(download_dir, os.W_OK)}")
+            
+            # Check if the directory is empty
+            try:
+                dir_contents = os.listdir(download_dir)
+                logger.info(f"Current directory contents: {dir_contents if dir_contents else 'Empty'}")
+            except Exception as e:
+                logger.warning(f"Could not list directory contents: {e}")
         else:
             logger.warning("No download directory specified - downloads may go to default location")
         
@@ -118,29 +112,19 @@ def setup_chrome_driver(headless=True, download_dir=None):
         if prefs:
             options.add_experimental_option("prefs", prefs)
         
-        # Initialize the driver - with Docker-specific configurations
+        # Initialize the driver
         logger.info("Initializing undetected_chromedriver...")
+        driver = uc.Chrome(
+            options=options,
+            version_main=None,  # Auto-detect Chrome version
+            use_subprocess=True
+        )
         
-        # Use Chromium-specific paths for Docker
-        if is_container:
-            driver = uc.Chrome(
-                options=options,
-                browser_executable_path="/usr/bin/chromium",  # Chromium path in Docker
-                driver_executable_path="/usr/bin/chromedriver",  # ChromeDriver path in Docker
-                version_main=None,  # Auto-detect browser version
-                use_subprocess=True
-            )
-            logger.info("Initialized Chromium with Docker-specific paths")
+        # Set window size or maximize
+        if not headless:
+            driver.maximize_window()
         else:
-            # Standard initialization for non-Docker environments
-            driver = uc.Chrome(
-                options=options,
-                version_main=None,  # Auto-detect browser version
-                use_subprocess=True
-            )
-        
-        # Set window size
-        driver.set_window_size(1920, 1080)
+            driver.set_window_size(1920, 1080)
         
         # Apply anti-detection methods
         driver.execute_script("""
@@ -170,8 +154,6 @@ def setup_chrome_driver(headless=True, download_dir=None):
         logger.error(f"Failed to initialize Chrome WebDriver: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        
-        # More informative error for Docker troubleshooting
         sys.exit(1)
 
 # Helper function for waiting with randomized delays
@@ -190,12 +172,11 @@ def create_wait(driver, timeout=10):
 def test_chrome_setup(download_test=False):
     """
     Test function to check Chrome setup and download functionality.
-    Particularly useful for verifying Docker configuration.
     
     Args:
         download_test (bool): Whether to test file downloading capability
     """
-    logger.info("Testing Chrome and WebDriver setup in container environment...")
+    logger.info("Testing Chrome and WebDriver setup...")
     driver = None
     try:
         # Create a test download directory if needed
@@ -205,17 +186,12 @@ def test_chrome_setup(download_test=False):
             os.makedirs(test_download_dir, exist_ok=True)
             logger.info(f"Created test download directory: {test_download_dir}")
         
-        # Initialize driver - always use headless in Docker
-        is_container = os.environ.get('WEBSITE_SITE_NAME') is not None or 'DOCKER_CONTAINER' in os.environ
-        headless = True if is_container else False
-        
-        driver = setup_chrome_driver(headless=headless, download_dir=test_download_dir)
+        # Initialize driver with download directory if testing downloads
+        driver = setup_chrome_driver(headless=False, download_dir=test_download_dir)
         
         # Basic connectivity test
         driver.get("https://www.google.com")
         logger.info(f"Page title: {driver.title}")
-        logger.info(f"Chrome version: {driver.capabilities['browserVersion']}")
-        logger.info(f"Driver version: {driver.capabilities['chrome']['chromedriverVersion'].split(' ')[0]}")
         
         # Download test if requested
         if download_test and test_download_dir:
@@ -246,10 +222,10 @@ def test_chrome_setup(download_test=False):
             except Exception as e:
                 logger.error(f"Download test failed: {e}")
         
-        logger.info("Chrome and WebDriver are working correctly in container environment!")
+        logger.info("Chrome and WebDriver are working correctly!")
         return True
     except Exception as e:
-        logger.error(f"Chrome/WebDriver test failed in container: {e}")
+        logger.error(f"Chrome/WebDriver test failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return False
@@ -258,9 +234,6 @@ def test_chrome_setup(download_test=False):
             driver.quit()
 
 if __name__ == "__main__":
-    # Set environment variable to indicate we're testing in Docker
-    os.environ['DOCKER_CONTAINER'] = 'true'
-    
     # Run the test function when this script is executed directly
     # Add --test-download command line arg to test download functionality
     download_test = "--test-download" in sys.argv

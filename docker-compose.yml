@@ -1,0 +1,17 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"  # Web application port
+      - "5900:5900"  # VNC port
+    volumes:
+      - .:/app
+      - ./downloads:/app/downloads
+      - ./merged_properties:/app/merged_properties
+      - ./tmp:/app/tmp
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOCKER_CONTAINER=true
+      - WEBSITE_SITE_NAME=DockerContainer
+    shm_size: 2gb
+    restart: unless-stopped

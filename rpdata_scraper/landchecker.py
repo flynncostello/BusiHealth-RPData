@@ -6,7 +6,6 @@ import random
 import logging
 import platform
 import os
-print(1)
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -14,7 +13,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 from chrome_utils import setup_chrome_driver
-print(2)
 
 # Set up logging
 logging.basicConfig(

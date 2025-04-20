@@ -6,13 +6,27 @@ import json
 import logging
 import traceback
 import shutil
+import sys
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
-import application_startup
+
+# Add current directory to path to help with imports in Docker
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
 
 # Load environment variables from .env file if it exists
 load_dotenv()
+
+# Determine containerized environment
+is_containerized = os.environ.get('WEBSITE_SITE_NAME') is not None or 'DOCKER_CONTAINER' in os.environ or False
+
+# Setup application startup (Docker environment handling)
+try:
+    import application_startup
+except ImportError:
+    logging.warning("application_startup module not found, skipping initialization")
 
 # Import main function from rpdata_scraper
 from rpdata_scraper.main import main
@@ -37,6 +51,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Log Docker/container environment information
+logger.info(f"Running in containerized environment: {is_containerized}")
+if is_containerized:
+    logger.info("Container environment variables:")
+    for key in ['WEBSITE_SITE_NAME', 'DOCKER_CONTAINER']:
+        if key in os.environ:
+            logger.info(f"  {key}: {os.environ[key]}")
 
 # Ensure necessary directories exist
 os.makedirs('downloads', exist_ok=True)
@@ -77,12 +98,20 @@ def process():
         os.makedirs(job_download_dir, exist_ok=True)
         os.makedirs(job_merged_dir, exist_ok=True)
         
+        # Set directory permissions for Docker
+        if is_containerized:
+            try:
+                os.chmod(job_download_dir, 0o777)
+                os.chmod(job_merged_dir, 0o777)
+                logger.info(f"Set directory permissions for Docker environment")
+            except Exception as e:
+                logger.warning(f"Could not set directory permissions: {e}")
+        
         logger.info(f"Created job directories for {job_id}: {job_download_dir}, {job_merged_dir}")
         
         # Determine headless mode
-        # In Azure App Service, always use headless mode
-        is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
-        headless = True if is_azure else False
+        # In containerized environments, always use headless mode
+        headless = True if is_containerized else False
         
         logger.info(f"Starting new job {job_id} with parameters: business_type={business_type}, "
                     f"locations={locations}, floor_area={min_floor_area}-{max_floor_area}, headless={headless}")
@@ -429,8 +458,53 @@ def healthcheck():
     """Health check endpoint for Azure monitoring"""
     return jsonify({
         'status': 'healthy',
-        'version': '1.0.0'
+        'version': '1.0.0',
+        'environment': 'containerized' if is_containerized else 'standard'
     })
+
+@app.route('/container-info')
+def container_info():
+    """Provide information about the container environment for debugging"""
+    if not is_containerized:
+        return jsonify({
+            'is_containerized': False,
+            'message': 'Not running in a container environment'
+        })
+    
+    try:
+        # Get Chrome version
+        chrome_version = "Unknown"
+        try:
+            import subprocess
+            chrome_version = subprocess.check_output(['google-chrome', '--version']).decode().strip()
+        except Exception as e:
+            chrome_version = f"Error checking Chrome: {str(e)}"
+        
+        # Check directory permissions
+        dir_info = {}
+        for dir_name in ['downloads', 'merged_properties', 'tmp']:
+            if os.path.exists(dir_name):
+                dir_info[dir_name] = {
+                    'exists': True,
+                    'writable': os.access(dir_name, os.W_OK),
+                    'files': len(os.listdir(dir_name))
+                }
+            else:
+                dir_info[dir_name] = {'exists': False}
+        
+        return jsonify({
+            'is_containerized': True,
+            'chrome_version': chrome_version,
+            'directories': dir_info,
+            'env_variables': {k: v for k, v in os.environ.items() if k in [
+                'WEBSITE_SITE_NAME', 'DOCKER_CONTAINER', 'PYTHONPATH', 'PATH', 'DISPLAY'
+            ]}
+        })
+    except Exception as e:
+        return jsonify({
+            'is_containerized': True,
+            'error': str(e)
+        })
 
 if __name__ == '__main__':
     # Make sure necessary directories exist
@@ -438,16 +512,17 @@ if __name__ == '__main__':
     os.makedirs('merged_properties', exist_ok=True)
     os.makedirs('tmp', exist_ok=True)
     
+    # Set Docker environment variable if not already set
+    if is_containerized and 'DOCKER_CONTAINER' not in os.environ:
+        os.environ['DOCKER_CONTAINER'] = 'true'
+    
     # Print working directory for debugging
     logger.info(f"Current working directory: {os.getcwd()}")
     logger.info(f"Python executable: {os.path.abspath(os.__file__)}")
     
-    # Check if running in Azure App Service
-    is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
-    
     # Set debug mode and host based on environment
-    debug_mode = not is_azure
-    host = '0.0.0.0' if is_azure else '127.0.0.1'
+    debug_mode = not is_containerized
+    host = '0.0.0.0'  # Always bind to all interfaces in Docker
     
     logger.info(f"Starting application with debug={debug_mode}, host={host}")
     app.run(host=host, port=8000, debug=debug_mode)
