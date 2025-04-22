@@ -10,15 +10,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const errorContainer = document.getElementById('error-container');
     const errorMessage = document.getElementById('error-message');
     const resetBtn = document.getElementById('resetBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    const backBtn = document.getElementById('backBtn');
     const locationsInput = document.getElementById('locations');
     
-    // Create modal instance
+    // Create modal instances
     const confirmModal = new bootstrap.Modal(document.getElementById('confirmationModal'));
     const confirmBtn = document.getElementById('confirmBtn');
+    
+    const cancelModal = new bootstrap.Modal(document.getElementById('cancelModal'));
+    const confirmCancelBtn = document.getElementById('confirmCancelBtn');
+    
+    const backModal = new bootstrap.Modal(document.getElementById('backModal'));
+    const confirmBackBtn = document.getElementById('confirmBackBtn');
     
     // Current job ID and status check interval
     let currentJobId = null;
     let statusInterval = null;
+    let isProcessing = false;
     
     // Function to validate locations input
     function validateLocations(locationsText) {
@@ -126,14 +135,92 @@ document.addEventListener('DOMContentLoaded', function() {
         startProcessing();
     });
     
-    // Reset button click
+    // Reset button click - only works on main form page
     resetBtn.addEventListener('click', function() {
-        resetUI();
-        fetch('/api/reset', { method: 'POST' });
+        // Only allow reset if not currently processing
+        if (!isProcessing) {
+            searchForm.reset();
+            
+            // Clear any location validation errors
+            const errorElement = document.getElementById('locations-error');
+            if (errorElement) {
+                errorElement.remove();
+            }
+            locationsInput.classList.remove('is-invalid');
+        }
     });
+    
+    // Back button click - shows confirmation dialog
+    if (backBtn) {
+        backBtn.addEventListener('click', function() {
+            // If we're not processing or if we have results ready, go back without confirmation
+            if (!isProcessing || downloadContainer.classList.contains('d-none') === false) {
+                resetUI();
+            } else {
+                // Otherwise show confirmation modal
+                backModal.show();
+            }
+        });
+    }
+    
+    // Confirm back button click
+    if (confirmBackBtn) {
+        confirmBackBtn.addEventListener('click', function() {
+            backModal.hide();
+            cancelCurrentJob();
+        });
+    }
+    
+    // Cancel button click - shows confirmation modal
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', function() {
+            cancelModal.show();
+        });
+    }
+    
+    // Confirm cancel button click
+    if (confirmCancelBtn) {
+        confirmCancelBtn.addEventListener('click', function() {
+            cancelModal.hide();
+            cancelCurrentJob();
+        });
+    }
+    
+    // Function to cancel the current job
+    function cancelCurrentJob() {
+        if (!currentJobId) return;
+        
+        // Show cancelling message
+        statusMessage.textContent = 'Cancelling job...';
+        
+        // Send cancel request to server
+        fetch('/api/cancel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ job_id: currentJobId })
+        })
+        .then(response => response.json())
+        .then(data => {
+            clearInterval(statusInterval);
+            statusInterval = null;
+            
+            // Reset UI after cancellation
+            resetUI();
+        })
+        .catch(error => {
+            console.error('Error cancelling job:', error);
+            // Still try to reset UI
+            resetUI();
+        });
+    }
     
     // Start processing function
     function startProcessing() {
+        // Mark as processing
+        isProcessing = true;
+        
         // Show progress, hide form
         formContainer.classList.add('d-none');
         progressContainer.classList.remove('d-none');
@@ -164,6 +251,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
             console.error('Error:', error);
             showError('Failed to submit request. Please try again.');
+            isProcessing = false;
         });
     }
     
@@ -178,17 +266,29 @@ document.addEventListener('DOMContentLoaded', function() {
             progressBar.style.width = `${data.progress}%`;
             statusMessage.textContent = data.message;
             
+            // Check if cancelled
+            if (data.status === 'cancelled') {
+                clearInterval(statusInterval);
+                statusInterval = null;
+                resetUI();
+                return;
+            }
+            
             // Check if completed
             if (data.status === 'completed' && data.result_file) {
                 clearInterval(statusInterval);
+                statusInterval = null;
                 downloadBtn.href = `/api/download/${currentJobId}`;
                 downloadContainer.classList.remove('d-none');
+                isProcessing = false; // No longer processing once complete
             }
             
             // Check if error
             if (data.status === 'error') {
                 clearInterval(statusInterval);
+                statusInterval = null;
                 showError(data.message);
+                isProcessing = false;
             }
         })
         .catch(error => {
@@ -214,6 +314,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Reset job ID
         currentJobId = null;
         
+        // Set processing state to false
+        isProcessing = false;
+        
         // Show form, hide progress
         formContainer.classList.remove('d-none');
         progressContainer.classList.add('d-none');
@@ -228,8 +331,5 @@ document.addEventListener('DOMContentLoaded', function() {
             errorElement.remove();
         }
         locationsInput.classList.remove('is-invalid');
-        
-        // Reset form
-        searchForm.reset();
     }
 });

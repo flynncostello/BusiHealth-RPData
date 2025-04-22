@@ -16,7 +16,6 @@ if current_dir not in sys.path:
 # Import required modules from the package
 from scraper.scrape_rpdata import scrape_rpdata
 from merge_excel import process_excel_files
-from clear_folders import clear_folders
 
 # Set up logging
 logging.basicConfig(
@@ -55,54 +54,83 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
     if progress_callback is None:
         def progress_callback(percentage, message):
             logger.info(f"Progress: {percentage}% - {message}")
-    
-    progress_callback(1, "Initializing RP Data scraper...")
-
-    # Default download directory if not specified
-    if download_dir is None:
-        download_dir = "downloads"
-    
-    # Default output directory if not specified
-    if output_dir is None:
-        output_dir = "merged_properties"
+            return True  # Always continue
         
-    # Ensure directories exist
-    os.makedirs(download_dir, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Check if we're running in Azure App Service - if so, force headless mode
-    is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
-    if is_azure and not headless:
-        logger.info("Running in Azure App Service, forcing headless mode")
-        headless = True
-
-    # Use default values if parameters are None
-    if locations is None:
-        locations = []
+    # Special Docker error handling
+    if is_azure or os.environ.get('DOCKER_CONTAINER') == 'true':
+        # Use helper function to test Chrome first
+        try:
+            from chrome_fix import setup_direct_chrome_driver
+            test_driver = setup_direct_chrome_driver(headless=True)
+            if test_driver is None:
+                logger.error("Chrome driver test failed - cannot proceed with scraping")
+                progress_callback(100, "Error: Chrome setup failed in Docker environment")
+                return None
+            # Close test driver
+            test_driver.quit()
+        except Exception as chrome_test_error:
+            logger.error(f"Chrome setup test failed: {chrome_test_error}")
+            progress_callback(100, "Error: Chrome setup failed with exception")
+            return None
     
-    if property_types is None:
-        property_types = ["Business", "Commercial"]
-    
-    if business_type is None:
-        business_type = "Vet"  # Default to Vet if not specified
-    
-    # Log the parameters
-    logger.info("===== RP DATA SCRAPER AND PROCESSOR =====")
-    logger.info(f"Locations: {locations}")
-    logger.info(f"Property Types: {property_types}")
-    logger.info(f"Floor Area: {min_floor_area} - {max_floor_area}")
-    logger.info(f"Business Type: {business_type}")
-    logger.info(f"Headless Mode: {headless}")
-    logger.info(f"Download Directory: {download_dir}")
-    logger.info(f"Output Directory: {output_dir}")
+    # Global scraper instance that can be terminated on cancellation
+    global_scraper = None
     
     try:
-        # No need to clear all folders - we're using job-specific directories now
-        # Step 1: Scrape RP Data
-        logger.info("\n===== STEP 1: SCRAPING RP DATA =====\n")
-        progress_callback(10, "Setting up scraper...")
+        # Check for early cancellation
+        if progress_callback(1, "Initializing RP Data scraper...") is False:
+            logger.info("Job cancelled before starting")
+            return None
+
+        # Default download directory if not specified
+        if download_dir is None:
+            download_dir = "downloads"
         
-        result_files = scrape_rpdata(
+        # Default output directory if not specified
+        if output_dir is None:
+            output_dir = "merged_properties"
+            
+        # Ensure directories exist
+        os.makedirs(download_dir, exist_ok=True)
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Check if we're running in Azure App Service - if so, force headless mode
+        is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
+        if is_azure and not headless:
+            logger.info("Running in Azure App Service, forcing headless mode")
+            headless = True
+
+        # Use default values if parameters are None
+        if locations is None:
+            locations = []
+        
+        if property_types is None:
+            property_types = ["Business", "Commercial"]
+        
+        if business_type is None:
+            business_type = "Vet"  # Default to Vet if not specified
+        
+        # Log the parameters
+        logger.info("===== RP DATA SCRAPER AND PROCESSOR =====")
+        logger.info(f"Locations: {locations}")
+        logger.info(f"Property Types: {property_types}")
+        logger.info(f"Floor Area: {min_floor_area} - {max_floor_area}")
+        logger.info(f"Business Type: {business_type}")
+        logger.info(f"Headless Mode: {headless}")
+        logger.info(f"Download Directory: {download_dir}")
+        logger.info(f"Output Directory: {output_dir}")
+        
+        # Check for cancellation before starting scraper
+        if progress_callback(10, "Setting up scraper...") is False:
+            logger.info("Job cancelled during setup")
+            return None
+        
+        # Pass the progress_callback to scrape_rpdata to check for cancellation during scraping
+        from scraper.scrape_rpdata import scrape_rpdata
+        
+        # Modify the scrape_rpdata function to store the scraper instance globally
+        # so it can be terminated if needed
+        result_files, global_scraper = scrape_rpdata(
             locations=locations,
             property_types=property_types,
             min_floor_area=min_floor_area,
@@ -111,6 +139,16 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             progress_callback=progress_callback,
             download_dir=download_dir
         )
+        
+        # Check for cancellation after scraping
+        if progress_callback(40, "Scraping completed, preparing to merge files...") is False:
+            logger.info("Job cancelled after scraping")
+            if global_scraper:
+                try:
+                    global_scraper.close()
+                except Exception as e:
+                    logger.warning(f"Error closing scraper on cancellation: {e}")
+            return None
         
         if not result_files:
             logger.error("No files were downloaded during scraping")
@@ -122,10 +160,18 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info("Waiting 3 seconds for files to finalize...")
         time.sleep(3)  # 3 second delay
         
+        # Check for cancellation again
+        if progress_callback(42, "Files downloaded, starting merge process...") is False:
+            logger.info("Job cancelled before merging")
+            return None
+        
         # Step 2: Process and merge the Excel files
         logger.info("\n===== STEP 2: PROCESSING AND MERGING FILES =====\n")
-        progress_callback(45, "Starting to process files into complete merged file...")
+        if progress_callback(45, "Starting to process files into complete merged file...") is False:
+            logger.info("Job cancelled before processing")
+            return None
 
+        from merge_excel import process_excel_files
         success = process_excel_files(
             files_dict=result_files,
             locations=locations,
@@ -141,6 +187,11 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         end_time = time.time()
         elapsed_time = end_time - start_time
         logger.info(f"Total processing time: {elapsed_time:.2f} seconds")
+        
+        # Final cancellation check
+        if progress_callback(98, "Processing complete, preparing final file...") is False:
+            logger.info("Job cancelled at final stage")
+            return None
         
         if success:
             # Get the name of the most recently created file in the output directory
@@ -167,6 +218,17 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.error(traceback.format_exc())
         progress_callback(100, f"Error: {str(e)}")
         return None
+    finally:
+        # Ensure browser is closed if we have a global scraper instance
+        if global_scraper:
+            try:
+                global_scraper.close()
+                logger.info("Closed global scraper instance in finally block")
+            except Exception as e:
+                logger.warning(f"Error closing global scraper in finally block: {e}")
+
+
+                
 
 # Function to allow testing this module directly
 def test_main():

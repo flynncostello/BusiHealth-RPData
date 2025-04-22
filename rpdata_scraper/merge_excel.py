@@ -23,6 +23,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+def check_cancellation(progress_callback, current_progress, message):
+    """Helper function to check if job has been cancelled"""
+    if progress_callback is None:
+        return False
+        
+    # Call the progress callback and check its return value
+    return progress_callback(current_progress, message) is False
+
 def find_header_row(df):
     """Find the row index where 'Property Photo' appears in the first column."""
     for idx, value in enumerate(df.iloc[:, 0]):
@@ -221,14 +229,25 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     if progress_callback is None:
         def progress_callback(percentage, message):
             pass  # No-op if no callback provided
+            return True  # Always continue
     
     logger.info("===== PROCESSING EXCEL FILES =====")
+
+    # Check for cancellation at the start
+    if check_cancellation(progress_callback, 48, "Starting to process Excel files..."):
+        logger.info("Job cancelled at the start of Excel processing")
+        return False
     
     # Generate filename if not provided
     if output_file is None:
         output_file = generate_filename(locations, property_types, min_floor, max_floor, output_dir)
     
     try:
+        # Check for cancellation before collecting data
+        if check_cancellation(progress_callback, 50, "Parsing Excel files..."):
+            logger.info("Job cancelled before Excel parsing")
+            return False
+        
         # Create a new workbook and select the active worksheet
         wb = Workbook()
         ws = wb.active
@@ -480,6 +499,11 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             if count > 1:
                 logger.info(f"Duplicate address detected: '{address}' appears {count} times")
 
+        # Add additional cancellation checks at key points
+        if check_cancellation(progress_callback, 60, "Collecting property data..."):
+            logger.info("Job cancelled while collecting property data")
+            return False
+
         progress_callback(50, "Obtaining zoning info for all properties...")
 
         # Second pass: get all zonings in one batch if we have addresses
@@ -561,6 +585,10 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         else:
             logger.warning("No valid addresses found for zoning lookup")
 
+        if check_cancellation(progress_callback, 70, "Getting zoning information..."):
+            logger.info("Job cancelled before getting zoning information")
+            return False
+        
         progress_callback(60, "Checking zoning table for allowable use...")
 
         ########################################################################################################################
@@ -574,6 +602,10 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             import traceback
             logger.error(traceback.format_exc())
 
+        if check_cancellation(progress_callback, 85, "Checking zoning allowances..."):
+            logger.info("Job cancelled before checking zoning allowances")
+            return False
+        
         progress_callback(96, "Writing all properties to final merged file...")
 
         # Write all rows to the worksheet
@@ -581,6 +613,10 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         
         # Current date for "Date Added" column
         today_str = datetime.now().strftime("%d/%m/%Y")
+
+        if check_cancellation(progress_callback, 95, "Writing to Excel file..."):
+            logger.info("Job cancelled before writing Excel file")
+            return False
         
         for i, row_data in enumerate(all_rows, 2):  # Start from row 2 (after headers)
             # Set "Property Photo" column to empty (column B, index 1)

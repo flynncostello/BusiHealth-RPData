@@ -1,17 +1,24 @@
+version: '3'
+
 services:
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "8000:8000"  # Web application port
-      - "5900:5900"  # VNC port
+      - "8000:8000"
     volumes:
-      - .:/app
-      - ./downloads:/app/downloads
-      - ./merged_properties:/app/merged_properties
-      - ./tmp:/app/tmp
+      - app-data:/app/merged_properties
+      - app-tmp:/app/tmp
     environment:
       - PYTHONUNBUFFERED=1
       - DOCKER_CONTAINER=true
       - WEBSITE_SITE_NAME=DockerContainer
-    shm_size: 2gb
+    shm_size: 4gb  # Increased from 2gb to 4gb
+    mem_limit: 8g  # Add explicit memory limit
+    cpus: 2        # Add CPU limit
     restart: unless-stopped
+
+volumes:
+  app-data:
+  app-tmp:

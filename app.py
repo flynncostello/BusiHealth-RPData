@@ -10,6 +10,7 @@ import sys
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
+import time
 
 # Add current directory to path to help with imports in Docker
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -51,6 +52,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Try to use direct Chrome driver if undetected_chromedriver fails
+try:
+    from chrome_fix import setup_direct_chrome_driver
+    logger.info("Loaded direct Chrome driver fallback")
+    os.environ['USE_DIRECT_CHROME'] = 'true'
+except ImportError:
+    logger.info("No direct Chrome driver fallback available")
+
 # Log Docker/container environment information
 logger.info(f"Running in containerized environment: {is_containerized}")
 if is_containerized:
@@ -66,6 +75,8 @@ os.makedirs('tmp', exist_ok=True)
 
 # Store running jobs
 jobs = {}
+# Store running job threads to allow termination
+job_threads = {}
 
 @app.route('/')
 def index():
@@ -126,7 +137,8 @@ def process():
             'message': 'Starting property search...',
             'result_file': None,
             'download_dir': job_download_dir,
-            'merged_dir': job_merged_dir
+            'merged_dir': job_merged_dir,
+            'cancelled': False  # Flag to mark job as cancelled
         }
         
         # Save status to file
@@ -142,11 +154,15 @@ def process():
         thread.daemon = True
         thread.start()
         
+        # Store the thread for possible cancellation
+        job_threads[job_id] = thread
+        
         return jsonify({'job_id': job_id})
     except Exception as e:
         logger.error(f"Error in process endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
 
 def run_job(job_id, locations, property_types, min_floor_area, max_floor_area, 
             business_type, headless, download_dir, output_dir):
@@ -154,9 +170,50 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
     try:
         update_job_status(job_id, 'running', 5, 'Initializing search...')
         
+        # Debugging: Test Chrome directly
+        try:
+            from chrome_fix import setup_direct_chrome_driver
+            logger.info("Testing Chrome setup before proceeding...")
+            test_driver = setup_direct_chrome_driver(headless=True)
+            if test_driver is None:
+                logger.error("Chrome setup test failed - cannot proceed with job")
+                update_job_status(job_id, 'error', 0, 'Chrome browser setup failed. Please try again later.')
+                return
+            else:
+                logger.info("Chrome setup test succeeded - proceeding with job")
+                test_driver.quit()
+        except Exception as chrome_test_error:
+            logger.error(f"Chrome setup test failed with exception: {chrome_test_error}")
+            update_job_status(job_id, 'error', 0, 'Chrome browser initialization failed. Please try again later.')
+            return
+        
+        # Ensure Chrome can run properly
+        if is_containerized:
+            # Set USE_DIRECT_CHROME to force using the direct Chrome driver
+            os.environ['USE_DIRECT_CHROME'] = 'true'
+            
+            # Make output directories world-writable for Chrome
+            try:
+                os.chmod(download_dir, 0o777)
+                os.chmod(output_dir, 0o777)
+                logger.info(f"Set directory permissions for Chrome access")
+            except Exception as e:
+                logger.warning(f"Could not set permissions: {e}")
+        
+        # Check if job is cancelled before starting
+        if check_if_cancelled(job_id):
+            logger.info(f"Job {job_id} was cancelled before starting")
+            cleanup_job_files(job_id)
+            return
+        
         # Create progress callback function
         def progress_callback(percentage, message):
             update_job_status(job_id, 'running', percentage, message)
+            # Check for cancellation during each callback
+            if check_if_cancelled(job_id):
+                logger.info(f"Job {job_id} cancelled during progress callback")
+                return False  # Signal to stop processing
+            return True  # Signal to continue processing
         
         # Call main function from rpdata_scraper with job-specific directories
         result = main(
@@ -170,6 +227,12 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             download_dir=download_dir,
             output_dir=output_dir
         )
+
+        # Check if job was cancelled during processing
+        if check_if_cancelled(job_id):
+            logger.info(f"Job {job_id} was cancelled after main processing")
+            cleanup_job_files(job_id)
+            return
 
         if result == 'No files downloaded':
             logger.error(f"No files downloaded during scraping for job {job_id}")
@@ -211,18 +274,58 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
         logger.error(f"Exception in run_job for job {job_id}: {str(e)}")
         logger.error(traceback.format_exc())
         update_job_status(job_id, 'error', 0, f'An error occurred: {str(e)}')
+    finally:
+        # Clean up job thread reference
+        if job_id in job_threads:
+            del job_threads[job_id]
+
+def check_if_cancelled(job_id):
+    """Check if a job has been marked for cancellation"""
+    if job_id not in jobs:
+        try:
+            # Try to load from disk if not in memory
+            with open(f'tmp/{job_id}.json', 'r') as f:
+                job_status = json.load(f)
+                jobs[job_id] = job_status
+        except Exception:
+            # If we can't load the status, assume not cancelled
+            return False
+    
+    # If job was cancelled, ensure immediate cleanup happens
+    if jobs[job_id].get('cancelled', False):
+        logger.info(f"Job {job_id} has been marked as cancelled")
+        return True
+    
+    return False
+
 
 def update_job_status(job_id, status, progress, message, result_file=None):
     """Update the status of a job"""
-    jobs[job_id] = {
-        'status': status,
-        'progress': progress,
-        'message': message,
-        'result_file': result_file,
-        # Preserve the directory paths
-        'download_dir': jobs[job_id]['download_dir'] if job_id in jobs else None,
-        'merged_dir': jobs[job_id]['merged_dir'] if job_id in jobs else None
-    }
+    if job_id in jobs:
+        current_job = jobs[job_id]
+        cancelled = current_job.get('cancelled', False)
+        
+        jobs[job_id] = {
+            'status': 'cancelled' if cancelled else status,
+            'progress': progress,
+            'message': 'Job was cancelled' if cancelled else message,
+            'result_file': result_file,
+            'cancelled': cancelled,
+            # Preserve the directory paths
+            'download_dir': current_job.get('download_dir'),
+            'merged_dir': current_job.get('merged_dir')
+        }
+    else:
+        # Create new job status if it doesn't exist in memory
+        jobs[job_id] = {
+            'status': status,
+            'progress': progress,
+            'message': message,
+            'result_file': result_file,
+            'cancelled': False,
+            'download_dir': None,
+            'merged_dir': None
+        }
     
     # Log status updates
     logger.info(f"Job {job_id} updated: {status}, {progress}%, {message}")
@@ -238,34 +341,54 @@ def cleanup_job_files(job_id):
     try:
         if job_id not in jobs:
             logger.warning(f"Cannot cleanup job {job_id}: job not found in memory")
-            return
+            # Try to load from disk
+            try:
+                with open(f'tmp/{job_id}.json', 'r') as f:
+                    jobs[job_id] = json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not load job {job_id} from disk: {e}")
+                return
             
         download_dir = jobs[job_id].get('download_dir')
         merged_dir = jobs[job_id].get('merged_dir')
         
         # Clean up download directory
         if download_dir and os.path.exists(download_dir):
-            shutil.rmtree(download_dir)
-            logger.info(f"Removed download directory for job {job_id}")
+            try:
+                shutil.rmtree(download_dir)
+                logger.info(f"Removed download directory for job {job_id}")
+            except Exception as e:
+                logger.error(f"Error removing download directory: {e}")
             
         # Clean up merged directory (excluding the downloaded file)
         if merged_dir and os.path.exists(merged_dir):
             result_file = jobs[job_id].get('result_file')
-            if result_file and os.path.exists(result_file):
+            if result_file and os.path.exists(result_file) and jobs[job_id].get('status') != 'cancelled':
                 # Only remove the directory after the user has downloaded the file
                 # Keep the directory for now to ensure the file is available for download
                 logger.info(f"Keeping merged directory for job {job_id} until file is downloaded")
             else:
-                shutil.rmtree(merged_dir)
-                logger.info(f"Removed merged directory for job {job_id}")
+                try:
+                    shutil.rmtree(merged_dir)
+                    logger.info(f"Removed merged directory for job {job_id}")
+                except Exception as e:
+                    logger.error(f"Error removing merged directory: {e}")
                 
         # Remove status file
         status_file = f'tmp/{job_id}.json'
         if os.path.exists(status_file):
-            os.remove(status_file)
-            logger.info(f"Removed status file for job {job_id}")
+            try:
+                os.remove(status_file)
+                logger.info(f"Removed status file for job {job_id}")
+            except Exception as e:
+                logger.error(f"Error removing status file: {e}")
             
         logger.info(f"Cleanup completed for job {job_id}")
+        
+        # Remove from memory
+        if job_id in jobs:
+            del jobs[job_id]
+            
     except Exception as e:
         logger.error(f"Error cleaning up job {job_id}: {str(e)}")
         logger.error(traceback.format_exc())
@@ -385,18 +508,67 @@ def download_file(job_id):
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/cancel', methods=['POST'])
+def cancel_job():
+    """Cancel a running job and clean up resources"""
+    try:
+        job_id = request.json.get('job_id')
+        if not job_id:
+            return jsonify({'error': 'No job ID provided'}), 400
+            
+        logger.info(f"Cancellation requested for job {job_id}")
+        
+        # Check if job exists
+        if job_id not in jobs and not os.path.exists(f'tmp/{job_id}.json'):
+            logger.error(f"Job {job_id} not found for cancellation")
+            return jsonify({'error': 'Job not found'}), 404
+            
+        # Load job from disk if not in memory
+        if job_id not in jobs:
+            try:
+                with open(f'tmp/{job_id}.json', 'r') as f:
+                    jobs[job_id] = json.load(f)
+            except Exception as e:
+                logger.error(f"Failed to load job status for cancellation: {str(e)}")
+                return jsonify({'error': 'Failed to load job status'}), 500
+        
+        # Mark job as cancelled
+        jobs[job_id]['cancelled'] = True
+        jobs[job_id]['status'] = 'cancelled'
+        jobs[job_id]['message'] = 'Job cancelled by user'
+        
+        # Save to disk - this is critical for the background process to detect cancellation
+        with open(f'tmp/{job_id}.json', 'w') as f:
+            json.dump(jobs[job_id], f)
+        
+        # IMPORTANT: Do NOT call cleanup_job_files() here!
+        # Let the background process detect cancellation and clean itself up
+        # This prevents the race condition where we delete the file before the process can see it
+        
+        # Schedule a delayed cleanup only if the job doesn't clean up after itself
+        def delayed_cleanup():
+            time.sleep(30)  # Wait 30 seconds
+            # Check if job still exists
+            if job_id in jobs:
+                logger.info(f"Performing delayed cleanup for job {job_id}")
+                cleanup_job_files(job_id)
+        
+        # Start delayed cleanup thread
+        cleanup_thread = threading.Thread(target=delayed_cleanup)
+        cleanup_thread.daemon = True
+        cleanup_thread.start()
+        
+        return jsonify({'success': True, 'message': 'Job cancelled successfully'})
+    except Exception as e:
+        logger.error(f"Error in cancel_job endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+    
+
 @app.route('/api/reset', methods=['POST'])
 def reset():
     """Reset the job (just for UI state, cleanup is handled after download)"""
-    job_id = request.json.get('job_id') if request.json else None
-    
-    if job_id and job_id in jobs:
-        # Clean up the job files for this specific job
-        cleanup_job_files(job_id)
-        # Remove from memory
-        if job_id in jobs:
-            del jobs[job_id]
-    
+    # This endpoint now only handles UX reset, not cancellation
     return jsonify({'success': True})
 
 @app.route('/test-download')
@@ -435,7 +607,8 @@ def test_download():
             'message': 'Processing complete!',
             'result_file': file_path,
             'download_dir': os.path.join('downloads', test_job_id),
-            'merged_dir': os.path.dirname(file_path)
+            'merged_dir': os.path.dirname(file_path),
+            'cancelled': False
         }
         
         # Save job status

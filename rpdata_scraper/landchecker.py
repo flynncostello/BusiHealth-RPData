@@ -549,7 +549,7 @@ class LandcheckerScraper:
                 logger.error(f"Error closing browser: {e}")
 
 
-def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Landchecker 2025", headless=False):
+def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Landchecker 2025", headless=False, progress_callback=None):
     """
     Get zoning information for multiple properties.
     
@@ -558,10 +558,16 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
         email (str): Login email
         password (str): Login password
         headless (bool): Whether to run browser in headless mode
+        progress_callback (function): Optional callback to check for cancellation
     
     Returns:
         dict: Dictionary with addresses as keys and zoning info as values
     """
+    # Default progress callback
+    if progress_callback is None:
+        def progress_callback(percentage, message):
+            return True  # Always continue
+    
     # Check if we're running in Docker - if so, force headless mode
     is_docker = os.environ.get('RUNNING_IN_DOCKER', 'false').lower() == 'true'
     if is_docker and not headless:
@@ -572,6 +578,12 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
     results = {}
     
     try:
+        # Check for cancellation before login
+        if progress_callback and progress_callback(65, "Logging into Landchecker...") is False:
+            logger.info("Job cancelled before Landchecker login")
+            scraper.close()
+            return results
+        
         # Step 1: Login
         login_success = scraper.login(email, password)
         if not login_success:
@@ -579,8 +591,24 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
             scraper.close()
             return results
         
+        # Check for cancellation after login
+        if progress_callback and progress_callback(68, "Getting zoning information...") is False:
+            logger.info("Job cancelled after Landchecker login")
+            scraper.close()
+            return results
+        
         # Step 2: Process each address
         for i, address in enumerate(addresses):
+            # Calculate progress percentage
+            progress = 68 + int(22 * (i / len(addresses)))
+            progress_msg = f"Processing address ({i+1}/{len(addresses)}): {address}"
+            
+            # Check for cancellation before each address
+            if progress_callback and progress_callback(progress, progress_msg) is False:
+                logger.info(f"Job cancelled during Landchecker processing at address {i+1}/{len(addresses)}")
+                scraper.close()
+                return results
+                
             logger.info(f"Processing address ({i+1}/{len(addresses)}): {address}")
             
             # Search for the address
