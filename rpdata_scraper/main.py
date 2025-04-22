@@ -55,23 +55,6 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         def progress_callback(percentage, message):
             logger.info(f"Progress: {percentage}% - {message}")
             return True  # Always continue
-        
-    # Special Docker error handling
-    if is_azure or os.environ.get('DOCKER_CONTAINER') == 'true':
-        # Use helper function to test Chrome first
-        try:
-            from chrome_fix import setup_direct_chrome_driver
-            test_driver = setup_direct_chrome_driver(headless=True)
-            if test_driver is None:
-                logger.error("Chrome driver test failed - cannot proceed with scraping")
-                progress_callback(100, "Error: Chrome setup failed in Docker environment")
-                return None
-            # Close test driver
-            test_driver.quit()
-        except Exception as chrome_test_error:
-            logger.error(f"Chrome setup test failed: {chrome_test_error}")
-            progress_callback(100, "Error: Chrome setup failed with exception")
-            return None
     
     # Global scraper instance that can be terminated on cancellation
     global_scraper = None
@@ -226,9 +209,6 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
                 logger.info("Closed global scraper instance in finally block")
             except Exception as e:
                 logger.warning(f"Error closing global scraper in finally block: {e}")
-
-
-                
 
 # Function to allow testing this module directly
 def test_main():

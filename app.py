@@ -23,12 +23,6 @@ load_dotenv()
 # Determine containerized environment
 is_containerized = os.environ.get('WEBSITE_SITE_NAME') is not None or 'DOCKER_CONTAINER' in os.environ or False
 
-# Setup application startup (Docker environment handling)
-try:
-    import application_startup
-except ImportError:
-    logging.warning("application_startup module not found, skipping initialization")
-
 # Import main function from rpdata_scraper
 from rpdata_scraper.main import main
 
@@ -51,14 +45,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Try to use direct Chrome driver if undetected_chromedriver fails
-try:
-    from chrome_fix import setup_direct_chrome_driver
-    logger.info("Loaded direct Chrome driver fallback")
-    os.environ['USE_DIRECT_CHROME'] = 'true'
-except ImportError:
-    logger.info("No direct Chrome driver fallback available")
 
 # Log Docker/container environment information
 logger.info(f"Running in containerized environment: {is_containerized}")
@@ -163,42 +149,11 @@ def process():
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
-
 def run_job(job_id, locations, property_types, min_floor_area, max_floor_area, 
             business_type, headless, download_dir, output_dir):
     """Run the main processing job in a background thread with job-specific directories"""
     try:
         update_job_status(job_id, 'running', 5, 'Initializing search...')
-        
-        # Debugging: Test Chrome directly
-        try:
-            from chrome_fix import setup_direct_chrome_driver
-            logger.info("Testing Chrome setup before proceeding...")
-            test_driver = setup_direct_chrome_driver(headless=True)
-            if test_driver is None:
-                logger.error("Chrome setup test failed - cannot proceed with job")
-                update_job_status(job_id, 'error', 0, 'Chrome browser setup failed. Please try again later.')
-                return
-            else:
-                logger.info("Chrome setup test succeeded - proceeding with job")
-                test_driver.quit()
-        except Exception as chrome_test_error:
-            logger.error(f"Chrome setup test failed with exception: {chrome_test_error}")
-            update_job_status(job_id, 'error', 0, 'Chrome browser initialization failed. Please try again later.')
-            return
-        
-        # Ensure Chrome can run properly
-        if is_containerized:
-            # Set USE_DIRECT_CHROME to force using the direct Chrome driver
-            os.environ['USE_DIRECT_CHROME'] = 'true'
-            
-            # Make output directories world-writable for Chrome
-            try:
-                os.chmod(download_dir, 0o777)
-                os.chmod(output_dir, 0o777)
-                logger.info(f"Set directory permissions for Chrome access")
-            except Exception as e:
-                logger.warning(f"Could not set permissions: {e}")
         
         # Check if job is cancelled before starting
         if check_if_cancelled(job_id):
