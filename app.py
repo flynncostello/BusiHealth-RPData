@@ -293,6 +293,10 @@ def update_job_status(job_id, status, progress, message, result_file=None):
 
 def cleanup_job_files(job_id):
     """Clean up job-specific directories after successful download"""
+    import time
+    time.sleep(10)  # Give browser time to complete download
+    logger.info(f"Cleaning up job files for {job_id}")
+
     try:
         if job_id not in jobs:
             logger.warning(f"Cannot cleanup job {job_id}: job not found in memory")
@@ -303,7 +307,7 @@ def cleanup_job_files(job_id):
             except Exception as e:
                 logger.warning(f"Could not load job {job_id} from disk: {e}")
                 return
-            
+        
         download_dir = jobs[job_id].get('download_dir')
         merged_dir = jobs[job_id].get('merged_dir')
         
@@ -317,17 +321,12 @@ def cleanup_job_files(job_id):
             
         # Clean up merged directory (excluding the downloaded file)
         if merged_dir and os.path.exists(merged_dir):
-            result_file = jobs[job_id].get('result_file')
-            if result_file and os.path.exists(result_file) and jobs[job_id].get('status') != 'cancelled':
-                # Only remove the directory after the user has downloaded the file
-                # Keep the directory for now to ensure the file is available for download
-                logger.info(f"Keeping merged directory for job {job_id} until file is downloaded")
-            else:
-                try:
-                    shutil.rmtree(merged_dir)
-                    logger.info(f"Removed merged directory for job {job_id}")
-                except Exception as e:
-                    logger.error(f"Error removing merged directory: {e}")
+            try:
+                shutil.rmtree(merged_dir)
+                logger.info(f"Removed merged directory for job {job_id}")
+            except Exception as e:
+                logger.error(f"Error removing merged directory: {e}")
+
                 
         # Remove status file
         status_file = f'tmp/{job_id}.json'

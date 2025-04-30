@@ -1,7 +1,7 @@
-# Use official Python base image with AMD64 architecture
-FROM python:3.9-slim-bullseye
+# Use official Python base
+FROM --platform=linux/amd64 python:3.9-slim-bullseye
 
-# Set environment variables
+# Set env variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
@@ -20,12 +20,11 @@ RUN apt-get update && apt-get install -y \
     libgbm1 libjpeg-dev libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome for Testing (v135)
+# Install Chrome (from Chrome for Testing)
 RUN mkdir -p /opt/chrome \
     && wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip \
     && unzip chrome-linux64.zip \
     && mv chrome-linux64/* /opt/chrome/ \
-    && chmod +x /opt/chrome/chrome \
     && ln -s /opt/chrome/chrome /usr/bin/google-chrome \
     && rm -rf chrome-linux64.zip chrome-linux64
 
@@ -40,19 +39,24 @@ RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VE
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Create directories and set permissions
-RUN mkdir -p /app/downloads /app/merged_properties /app/tmp \
-    && chmod -R 777 /app/downloads /app/merged_properties /app/tmp
+RUN pip install undetected-chromedriver selenium xvfbwrapper
 
 # Copy app source code
 COPY . .
 
-# Expose the Flask app port
+# Create necessary directories and set permissions
+RUN mkdir -p /app/downloads /app/merged_properties /app/tmp \
+    && chmod -R 777 /app/downloads /app/merged_properties /app/tmp
+
+# Expose port
 EXPOSE 8000
 
-# Run using Gunicorn directly (no entrypoint.sh)
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app"]
+# Copy entrypoint script and make it executable
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Start app
+ENTRYPOINT ["/entrypoint.sh"]

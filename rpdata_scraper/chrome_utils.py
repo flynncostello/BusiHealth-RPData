@@ -33,6 +33,8 @@ def setup_chrome_driver(headless=True, download_dir=None):
     """
     try:
         logger.info("Setting up Chrome driver for Docker environment...")
+        # Force undetected-chromedriver to pass required args when running as root
+        os.environ["UCD_CHROME_ARGS"] = "--no-sandbox --disable-dev-shm-usage"
         logger.info(f"Headless mode: {headless}")
         
         # Detect if we're in a container
@@ -56,26 +58,28 @@ def setup_chrome_driver(headless=True, download_dir=None):
             options.add_argument("--ignore-gpu-blocklist")
             options.add_argument("--enable-webgl")
             options.add_argument("--disable-gpu-sandbox")
-            options.add_argument("--enable-gpu")  # Enable GPU on macOS
+            options.add_argument("--enable-gpu")
             options.add_argument("--enable-gpu-rasterization")
             options.add_argument("--enable-zero-copy")
             options.add_argument("--enable-accelerated-2d-canvas")
-            
-            # Important: Metal API support for macOS
-            options.add_argument("--use-gl=angle")  # Use ANGLE instead of SwiftShader on Mac
-            options.add_argument("--use-angle=metal")  # Use Metal backend
-            
+            options.add_argument("--use-gl=angle")
+            options.add_argument("--use-angle=metal")
             # Don't add --disable-gpu on Mac
         else:
-            # Non-macOS WebGL fixes (Linux/Windows)
             logger.info("Applying standard WebGL settings")
             options.add_argument("--ignore-gpu-blocklist")
             options.add_argument("--enable-webgl")
             options.add_argument("--disable-gpu-sandbox")
-            options.add_argument("--use-gl=swiftshader")  # Use SwiftShader on non-Mac
-            options.add_argument("--enable-gpu-rasterization")
-            options.add_argument("--enable-accelerated-2d-canvas")
-            options.add_argument("--disable-gpu")  # Helpful on Linux
+            options.add_argument("--use-gl=swiftshader")
+            options.add_argument("--disable-gpu")
+            options.add_argument("--disable-software-rasterizer")
+            options.add_argument("--disable-accelerated-2d-canvas")
+            options.add_argument("--disable-gl-drawing-for-tests")
+            options.add_argument("--no-zygote")
+            options.add_argument("--disable-web-security")
+
+
+
         
         # Original options
         options.add_argument("--disable-blink-features=AutomationControlled")
@@ -89,8 +93,8 @@ def setup_chrome_driver(headless=True, download_dir=None):
         # Headless settings
         # In Docker, we almost always want to run headless
         if headless or is_container:
-            #options.add_argument("--headless=new")
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
+            #options.add_argument("--headless")
         
 
 
@@ -161,11 +165,13 @@ def setup_chrome_driver(headless=True, download_dir=None):
         
         # Use Chromium-specific paths for Docker
         if is_container:
+            assert os.path.exists("/opt/chrome/chrome"), "Chrome binary not found!"
+            assert os.access("/opt/chrome/chrome", os.X_OK), "Chrome binary is not executable!"
             driver = uc.Chrome(
                 options=options,
                 browser_executable_path="/opt/chrome/chrome",  # Chrome path in Docker
                 driver_executable_path="/usr/bin/chromedriver",  # ChromeDriver path in Docker
-                version_main=None,  # Auto-detect browser version
+                version_main=135,  # Use Version 135 for Docker
                 use_subprocess=True
             )
             logger.info("Initialized Chromium with Docker-specific paths")
@@ -173,9 +179,10 @@ def setup_chrome_driver(headless=True, download_dir=None):
             # Standard initialization for non-Docker environments
             driver = uc.Chrome(
                 options=options,
-                version_main=None,  # Auto-detect browser version
+                version_main=135,  # 🔧 Force version to match your local Chrome
                 use_subprocess=True
             )
+
         
         # Set window size
         driver.set_window_size(1920, 1080)
