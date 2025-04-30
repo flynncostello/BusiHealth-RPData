@@ -22,10 +22,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class LandcheckerScraper:
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, download_dir=None):
         """Initialize the scraper with Undetected ChromeDriver."""
-        self.driver = setup_chrome_driver(headless=headless)
+
+        # Use a safe default download path if not provided
+        if download_dir is None:
+            download_dir = os.path.join(os.getcwd(), "downloads")
+
+        # Make sure the directory exists
+        os.makedirs(download_dir, exist_ok=True)
+
+        self.download_dir = download_dir
+        self.driver = setup_chrome_driver(headless=headless, download_dir=self.download_dir)
         self.login_url = "https://app.landchecker.com.au/login"
+
         
     def random_delay(self, min_sec=0.1, max_sec=0.2):
         """Add a minimal random delay between actions - ultra minimal but still avoiding detection."""
@@ -567,12 +577,6 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
     if progress_callback is None:
         def progress_callback(percentage, message):
             return True  # Always continue
-    
-    # Check if we're running in Docker - if so, force headless mode
-    is_docker = os.environ.get('RUNNING_IN_DOCKER', 'false').lower() == 'true'
-    if is_docker and not headless:
-        logger.info("Running in Docker, forcing headless mode")
-        headless = True
         
     scraper = LandcheckerScraper(headless=headless)
     results = {}
