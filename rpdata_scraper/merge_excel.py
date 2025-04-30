@@ -516,7 +516,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             # Call get_property_zonings with unique addresses
             try:
                 logger.info(f"Getting zoning info for {len(unique_addresses)} unique addresses")
-                zonings_dict = get_property_zonings(unique_addresses, headless=headless)
+                zonings_dict = get_property_zonings(unique_addresses, headless=headless, progress_callback=progress_callback)
                 logger.info(f"Successfully retrieved zoning info for {len(zonings_dict)} properties")
                 
                 # Create a mapping of normalized zonings addresses to their values
