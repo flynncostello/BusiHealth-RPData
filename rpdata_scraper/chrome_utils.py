@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Chrome utilities for web scraping with undetected-chromedriver
-# Optimized for Docker environments
+# Optimized for Docker and Azure environments
 
 import os
 import sys
@@ -22,37 +22,53 @@ logger = logging.getLogger(__name__)
 
 def setup_chrome_driver(headless=True, download_dir=None):
     """
-    Set up and return an Undetected ChromeDriver instance optimized for Docker environments.
+    Set up and return an Undetected ChromeDriver instance optimized for cloud environments.
     
     Args:
-        headless (bool): Whether to run Chrome in headless mode (should be True in Docker)
+        headless (bool): Whether to run Chrome in headless mode (will be overridden in Azure)
         download_dir (str): Directory where downloads should be saved
         
     Returns:
         driver: Configured undetected_chromedriver instance
     """
     try:
-        logger.info("Setting up Chrome driver for Docker environment...")
+        logger.info("Setting up Chrome driver for cloud/Docker environment...")
+        
         # Force undetected-chromedriver to pass required args when running as root
         os.environ["UCD_CHROME_ARGS"] = "--no-sandbox --disable-dev-shm-usage"
-        logger.info(f"Headless mode: {headless}")
         
-        # Detect if we're in a container
-        is_container = os.environ.get('WEBSITE_SITE_NAME') is not None or 'DOCKER_CONTAINER' in os.environ
-        logger.info(f"Running in container: {is_container}")
-        
-        # Detect macOS
+        # Detect environment - critical for configuration
+        is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
+        is_container = is_azure or 'DOCKER_CONTAINER' in os.environ or os.path.exists('/.dockerenv')
         is_macos = platform.system() == "Darwin"
-        logger.info(f"Running on macOS: {is_macos}")
         
-        # Configure Chrome options - optimized for Docker
+        logger.info(f"Environment detection: Azure={is_azure}, Container={is_container}, macOS={is_macos}")
+        
+        # CRITICAL FIX FOR AZURE: Override headless setting in Azure
+        original_headless = headless
+        if is_azure:
+            headless = False
+            logger.info(f"Running in Azure - forcing non-headless mode (was: {original_headless})")
+        
+        logger.info(f"Using headless mode: {headless}")
+        
+        # Configure Chrome options - optimized for cloud environments
         options = uc.ChromeOptions()
         
-        # Essential options for Docker environment
-        options.add_argument("--no-sandbox")  # Required for Docker
+        # Essential options for containerized environments
+        options.add_argument("--no-sandbox")  # Required for containers
         options.add_argument("--disable-dev-shm-usage")  # Overcome limited resource issues
         options.add_argument("--remote-debugging-port=9222")
-        # WebGL fixes - macOS specific configuration
+        
+        # Add a realistic user agent to avoid detection
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36"
+        options.add_argument(f"--user-agent={user_agent}")
+        
+        # Anti-bot detection features
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--window-size=1920,1080")
+        
+        # Platform-specific WebGL settings
         if is_macos:
             logger.info("Applying macOS-specific WebGL settings")
             options.add_argument("--ignore-gpu-blocklist")
@@ -77,32 +93,24 @@ def setup_chrome_driver(headless=True, download_dir=None):
             options.add_argument("--disable-gl-drawing-for-tests")
             options.add_argument("--no-zygote")
             options.add_argument("--disable-web-security")
-
-
-
-        
-        # Original options
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--window-size=1920,1080")
         
         # Log all Chrome options for debugging
         logger.info("Chrome Options:")
         for arg in options.arguments:
             logger.info(f"  {arg}")
         
-        # Headless settings
-        # In Docker, we almost always want to run headless
-        if headless or is_container:
+        # Configure headless mode if not overridden
+        if headless and not is_azure:
+            # Use modern headless mode for better compatibility
             options.add_argument("--headless=new")
-            #options.add_argument("--headless")
-        
-
-
+            
             # Parameters to help with downloads in headless mode
             options.add_argument("--disable-features=IsolateOrigins,site-per-process")
             options.add_argument("--disable-site-isolation-trials")
             logger.info("Configured headless mode with download optimizations")
                 
+        ### FIXES ABOVE HERE ###
+
         # Initialize preferences
         prefs = {}
         

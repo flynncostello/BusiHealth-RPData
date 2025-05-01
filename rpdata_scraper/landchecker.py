@@ -34,18 +34,7 @@ class LandcheckerScraper:
         # Make sure the directory exists
         os.makedirs(download_dir, exist_ok=True)
 
-        self.download_dir = download_dir
-        logger.info("Setting up Chrome driver...")
-        self.driver = setup_chrome_driver(headless=headless, download_dir=self.download_dir)
-        
-        # Critical fix for Azure and Cloudflare protection
-        logger.info("Waiting for browser to fully initialize...")
-        time.sleep(5)  # Increased wait time, especially important for Azure
-        logger.info("Browser initialization complete")
-        
-        self.login_url = "https://app.landchecker.com.au/login"
-
-        # Add environment detection
+        # Add environment detection early
         self.is_cloud = any([
             os.environ.get('WEBSITE_SITE_NAME') is not None,  # Azure App Service
             os.environ.get('DOCKER_CONTAINER') == 'true',     # Docker container
@@ -55,15 +44,35 @@ class LandcheckerScraper:
             os.environ.get('RUNNING_IN_AZURE') == 'true'  # Custom flag you can set
         ])
         
+        # CRITICAL FIX: Override headless parameter in Azure to use non-headless mode
+        # This is because we've confirmed headless=False works locally
+        original_headless = headless
+        if self.is_cloud and headless:
+            headless = False
+            logger.info(f"Running in Azure - forcing non-headless mode (was: {original_headless})")
+        
+        self.download_dir = download_dir
+        logger.info(f"Setting up Chrome driver with headless={headless}...")
+        self.driver = setup_chrome_driver(headless=headless, download_dir=self.download_dir)
+        
+        # Critical fix for Azure and Cloudflare protection
+        # Longer wait time in cloud environments
+        wait_time = 10 if self.is_cloud else 5
+        logger.info(f"Waiting {wait_time}s for browser to fully initialize...")
+        time.sleep(wait_time)
+        logger.info("Browser initialization complete")
+        
+        self.login_url = "https://app.landchecker.com.au/login"
+        
         logger.info(f"Running in cloud environment: {self.is_cloud}")
         
         # Set timeouts based on environment
         if self.is_cloud:
             # Much longer timeouts for cloud environments
-            self.std_timeout = 15     # Standard timeout (was 1)
-            self.min_delay = 1.0      # Minimum delay (was 0.03)
-            self.max_delay = 2.0      # Maximum delay (was 0.05)
-            self.page_load_delay = 6.0  # Page load delay (was 0.2-0.3)
+            self.std_timeout = 15     # Standard timeout
+            self.min_delay = 1.0      # Minimum delay
+            self.max_delay = 2.0      # Maximum delay
+            self.page_load_delay = 6.0  # Page load delay
             self.typing_delay_min = 0.01  # Typing delay min
             self.typing_delay_max = 0.03  # Typing delay max
             self.popup_wait = 4.0     # Wait for popup
