@@ -12,7 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chrome_utils import setup_chrome_driver
@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 class LandcheckerScraper:
     def __init__(self, headless=False, download_dir=None):
         """Initialize the scraper with Undetected ChromeDriver."""
-
         # Use a safe default download path if not provided
         if download_dir is None:
             download_dir = os.path.join(os.getcwd(), "downloads")
@@ -36,52 +35,108 @@ class LandcheckerScraper:
         os.makedirs(download_dir, exist_ok=True)
 
         self.download_dir = download_dir
+        logger.info("Setting up Chrome driver...")
         self.driver = setup_chrome_driver(headless=headless, download_dir=self.download_dir)
+        
+        # Critical fix for Azure and Cloudflare protection
+        logger.info("Waiting for browser to fully initialize...")
+        time.sleep(5)  # Increased wait time, especially important for Azure
+        logger.info("Browser initialization complete")
+        
         self.login_url = "https://app.landchecker.com.au/login"
 
+        # Add environment detection
+        self.is_cloud = any([
+            os.environ.get('WEBSITE_SITE_NAME') is not None,  # Azure App Service
+            os.environ.get('DOCKER_CONTAINER') == 'true',     # Docker container
+            os.environ.get('AZURE_FUNCTIONS_ENVIRONMENT') is not None,  # Azure Functions
+            os.environ.get('KUBERNETES_SERVICE_HOST') is not None,  # Kubernetes
+            os.path.exists('/.dockerenv'),  # Another Docker check
+            os.environ.get('RUNNING_IN_AZURE') == 'true'  # Custom flag you can set
+        ])
         
-    def random_delay(self, min_sec=0.1, max_sec=0.2):
-        """Add a minimal random delay between actions - ultra minimal but still avoiding detection."""
+        logger.info(f"Running in cloud environment: {self.is_cloud}")
+        
+        # Set timeouts based on environment
+        if self.is_cloud:
+            # Much longer timeouts for cloud environments
+            self.std_timeout = 15     # Standard timeout (was 1)
+            self.min_delay = 1.0      # Minimum delay (was 0.03)
+            self.max_delay = 2.0      # Maximum delay (was 0.05)
+            self.page_load_delay = 6.0  # Page load delay (was 0.2-0.3)
+            self.typing_delay_min = 0.01  # Typing delay min
+            self.typing_delay_max = 0.03  # Typing delay max
+            self.popup_wait = 4.0     # Wait for popup
+            self.search_dropdown_wait = 3.0  # Wait for search dropdown
+            self.click_retry_delay = 1.0  # Delay between click retries
+            logger.info("Using extended timeouts for cloud environment")
+        else:
+            # Keep existing fast timeouts for local environment
+            self.std_timeout = 2      # Increased from 1 to 2
+            self.min_delay = 0.03
+            self.max_delay = 0.05
+            self.page_load_delay = 0.5  # Increased from 0.3 to 0.5
+            self.typing_delay_min = 0.003
+            self.typing_delay_max = 0.008
+            self.popup_wait = 0.7     # Increased from 0.5 to 0.7
+            self.search_dropdown_wait = 0.2
+            self.click_retry_delay = 0.05
+            logger.info("Using standard timeouts for local environment")
+        
+    def random_delay(self, min_sec=None, max_sec=None):
+        """Add a random delay between actions."""
+        if min_sec is None:
+            min_sec = self.min_delay
+        if max_sec is None:
+            max_sec = self.max_delay
+            
         delay = random.uniform(min_sec, max_sec)
         time.sleep(delay)
+        return delay
     
     def human_like_typing(self, element, text):
-        """Type text with minimal delays between keypresses - ultra fast typing."""
+        """Type text with delays between keypresses."""
         # Focus the element directly
         self.driver.execute_script("arguments[0].focus();", element)
         
         # Clear any existing value while preserving focus
         self.driver.execute_script("arguments[0].value = '';", element)
         
-        # Type with faster random delays
+        # Type with random delays
         for char in text:
             element.send_keys(char)
-            time.sleep(random.uniform(0.003, 0.008))  # Ultra-fast typing
+            time.sleep(random.uniform(self.typing_delay_min, self.typing_delay_max))
     
-    def wait_and_find_element(self, by, value, timeout=1):  # Minimal timeout
+    def wait_and_find_element(self, by, value, timeout=None):
         """Wait for an element to be present and return it."""
+        if timeout is None:
+            timeout = self.std_timeout
+            
         try:
             element = WebDriverWait(self.driver, timeout).until(
                 EC.presence_of_element_located((by, value))
             )
             return element
         except TimeoutException:
-            logger.error(f"Timed out waiting for element: {value}")
+            logger.error(f"Timed out waiting for element: {by}='{value}' after {timeout}s")
             return None
     
-    def wait_and_find_clickable(self, by, value, timeout=1):  # Minimal timeout
+    def wait_and_find_clickable(self, by, value, timeout=None):
         """Wait for an element to be clickable and return it."""
+        if timeout is None:
+            timeout = self.std_timeout
+            
         try:
             element = WebDriverWait(self.driver, timeout).until(
                 EC.element_to_be_clickable((by, value))
             )
             return element
         except TimeoutException:
-            logger.error(f"Timed out waiting for clickable element: {value}")
+            logger.error(f"Timed out waiting for clickable element: {by}='{value}' after {timeout}s")
             return None
     
-    def safe_click(self, element, retries=1):  # Single retry
-        """Attempt to click an element with single retry and minimal delays."""
+    def safe_click(self, element, retries=1):
+        """Attempt to click an element with retries."""
         for i in range(retries + 1):  # +1 to include initial attempt
             try:
                 # Direct JavaScript click - fastest method
@@ -97,23 +152,23 @@ class LandcheckerScraper:
                 except Exception as e:
                     if i < retries:
                         logger.warning(f"Click failed: {e}, retrying")
-                        self.random_delay(0.05, 0.08)  # Minimal delay between retries
+                        self.random_delay(self.click_retry_delay, self.click_retry_delay * 2)
         
         logger.error("Failed to click element")
         return False
     
     def login(self, email, password):
-        """Log in to the Landchecker website with optimized timing."""
-        logger.info("Attempting to log in...")
+        """Log in to the Landchecker website."""
+        logger.info(f"Attempting to log in with email: {email}")
         
         try:
             # Navigate to login page
             self.driver.get(self.login_url)
-            self.random_delay(0.2, 0.3)  # Minimal wait after page load
+            self.random_delay(self.page_load_delay, self.page_load_delay * 1.5)
             
             logger.info("Login page loaded")
             
-            # Find and fill email field - using selector that worked in logs
+            # Find and fill email field (using selector that works from logs)
             email_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#email")
             
             if email_field:
@@ -123,9 +178,9 @@ class LandcheckerScraper:
                 logger.error("Email field not found")
                 return False
             
-            self.random_delay(0.03, 0.05)  # Ultra minimal delay between fields
+            self.random_delay()
             
-            # Find and fill password field - using selector that worked in logs
+            # Find and fill password field (using selector that works from logs)
             password_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#password")
             
             if password_field:
@@ -135,9 +190,9 @@ class LandcheckerScraper:
                 logger.error("Password field not found")
                 return False
             
-            self.random_delay(0.03, 0.05)  # Ultra minimal delay before clicking
+            self.random_delay()
             
-            # Find and click login button - using selector that worked in logs
+            # Find and click login button (using selector that works from logs)
             login_button = self.wait_and_find_clickable(By.CSS_SELECTOR, "button[type='submit']")
             
             if login_button:
@@ -153,17 +208,18 @@ class LandcheckerScraper:
             # Wait for login to complete
             try:
                 # Wait for redirection away from login page
-                WebDriverWait(self.driver, 3).until(  # Reduced timeout
+                login_wait = self.std_timeout * 2 if self.is_cloud else 5
+                WebDriverWait(self.driver, login_wait).until(
                     lambda driver: "login" not in driver.current_url.lower()
                 )
-                logger.info("Login successful - redirected away from login page")
+                logger.info(f"Login successful - redirected to: {self.driver.current_url}")
                 
-                # Minimal wait for page load after login
-                self.random_delay(0.2, 0.3)
+                # Wait for dashboard to load
+                self.random_delay(self.page_load_delay, self.page_load_delay * 1.5)
                 
                 return True
             except TimeoutException:
-                logger.error("Login appears to have failed - still on login page after 3 seconds")
+                logger.error(f"Login appears to have failed - still on login page after {login_wait} seconds")
                 return False
                 
         except Exception as e:
@@ -171,107 +227,85 @@ class LandcheckerScraper:
             return False
     
     def is_popup_open(self):
-        """Quick check if a zoning info popup is currently open."""
+        """Check if a zoning info popup is currently open."""
         try:
-            # Ultra fast check for dialog elements
             dialog_elements = self.driver.find_elements(By.CSS_SELECTOR, "div[role='dialog'], div[role='presentation']")
-            return any(dialog.is_displayed() for dialog in dialog_elements)
-        except Exception:
+            return any(dialog.is_displayed() for dialog in dialog_elements if not isinstance(dialog, StaleElementReferenceException))
+        except Exception as e:
+            logger.warning(f"Error checking for popup: {e}")
             return False
     
     def close_popup(self):
-        """Close the zoning info popup dialog quickly."""
+        """Close the zoning info popup dialog."""
         try:
             # First check if there's actually a popup open
             if not self.is_popup_open():
                 logger.info("No popup detected, skipping close operation")
                 return True
             
-            # If popup is open, find the close button
-            close_button = None
+            # Try using Escape key first (most reliable method based on logs)
+            logger.info("Sending Escape key to close popup")
+            webdriver.ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+            self.random_delay()
             
-            # Try the main selector that worked in logs first
+            # Check if popup is still open
+            if not self.is_popup_open():
+                logger.info("Popup closed successfully with Escape key")
+                return True
+            
+            # If Escape didn't work, try clicking close button
             try:
                 close_button = self.wait_and_find_clickable(
                     By.CSS_SELECTOR, 
-                    "button[data-test='zoneOverlayInfoDialog-closeIcon']", 
-                    timeout=0.3  # Ultra minimal timeout
+                    "button[data-test='zoneOverlayInfoDialog-closeIcon'], button[aria-label='Close']",
+                    timeout=self.std_timeout / 2
                 )
+                
+                if close_button:
+                    self.driver.execute_script("arguments[0].click();", close_button)
+                    logger.info("Closed popup with close button")
+                    self.random_delay()
+                    return True
             except Exception:
                 pass
             
-            # If not found, try a few other selectors with shorter timeout
-            if not close_button:
-                close_selectors = [
-                    "button[aria-label='Close']",
-                    "//button[@aria-label='Close']"
-                ]
-                
-                for selector in close_selectors:
-                    try:
-                        if selector.startswith("//"):
-                            close_button = self.wait_and_find_clickable(By.XPATH, selector, timeout=0.2)  # Ultra minimal timeout
-                        else:
-                            close_button = self.wait_and_find_clickable(By.CSS_SELECTOR, selector, timeout=0.2)  # Ultra minimal timeout
-                        
-                        if close_button and close_button.is_displayed():
-                            logger.info(f"Found close button with alternative selector: {selector}")
-                            break
-                    except Exception:
-                        continue
-            
-            if close_button:
-                # Use JavaScript to click the button - fastest method
-                self.driver.execute_script("arguments[0].click();", close_button)
-                logger.info("Closed popup successfully")
-                # Brief wait for popup to close
-                self.random_delay(0.03, 0.05)  # Ultra minimal wait
-                return True
-            else:
-                # If no close button found but we detected a popup, try escape key
-                try:
-                    logger.info("No close button found, trying Escape key")
-                    webdriver.ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
-                    self.random_delay(0.03, 0.05)  # Ultra minimal wait after Escape
-                    return True
-                except Exception:
-                    logger.warning("Failed to close popup with Escape key")
-                    return False
+            # If we get here, neither method worked
+            logger.warning("Could not close popup, will continue anyway")
+            return True
                 
         except Exception as e:
             logger.error(f"Error closing popup: {e}")
             return False
     
     def return_to_search(self):
-        """Return to the map page and clear the search bar quickly."""
+        """Return to the map page and clear the search bar."""
         try:
             # Only close popup if it's open
             if self.is_popup_open():
                 self.close_popup()
-                # Minimal wait
-                self.random_delay(0.03, 0.05)  # Ultra minimal wait
+                self.random_delay()
             
-            # Look for the search bar
+            # Look for the search bar (using selector that works from logs)
             search_field = self.wait_and_find_clickable(
                 By.CSS_SELECTOR, 
                 "input[placeholder='Search by address, lot, locality, municipality or postcode']",
-                timeout=0.8  # Ultra minimal timeout
+                timeout=self.std_timeout
             )
             
             if not search_field:
                 logger.error("Search field not found when trying to return to search")
                 return False
                 
-            # Clear the search field completely using faster method
+            # Clear the search field
             search_field.click()
             
-            # Use keyboard shortcuts to select all and delete - faster
+            # Use keyboard shortcuts to select all and delete
             if platform.system() == "Darwin":
                 search_field.send_keys(Keys.COMMAND, 'a')
             else:
                 search_field.send_keys(Keys.CONTROL, 'a')
                 
-            self.random_delay(0.02, 0.04)  # Ultra minimal delay
+            self.random_delay(self.min_delay, self.min_delay * 2)
             search_field.send_keys(Keys.DELETE)
             
             logger.info("Cleared search field successfully")
@@ -281,15 +315,15 @@ class LandcheckerScraper:
             return False
     
     def search_address(self, address):
-        """Search for a specified address with optimized timing."""
+        """Search for a specified address."""
         logger.info(f"Searching for address: {address}")
         
         try:
-            # Find and click on the search bar
+            # Find and click on the search bar (using selector that works from logs)
             search_field = self.wait_and_find_clickable(
                 By.CSS_SELECTOR, 
                 "input[placeholder='Search by address, lot, locality, municipality or postcode']",
-                timeout=1  # Minimal timeout
+                timeout=self.std_timeout
             )
             
             if not search_field:
@@ -299,23 +333,23 @@ class LandcheckerScraper:
             # Clear any existing text
             search_field.clear()
             
-            # Enter the address with faster typing
+            # Enter the address
             self.human_like_typing(search_field, address)
             logger.info("Address entered in search field")
             
-            self.random_delay(0.15, 0.25)  # Minimal wait for dropdown
+            self.random_delay(self.search_dropdown_wait, self.search_dropdown_wait * 1.5)
             
-            # Look specifically for the first dropdown result
+            # Look for the first dropdown result (using selector that works from logs)
             first_result = self.wait_and_find_element(
                 By.CSS_SELECTOR, 
                 "div[data-test^='appBarSearch-result']:first-of-type",
-                timeout=1  # Minimal timeout
+                timeout=self.std_timeout
             )
             
             if first_result:
                 logger.info(f"First result text: {first_result.text}")
                 
-                # Direct JavaScript click - fastest
+                # Direct JavaScript click
                 self.driver.execute_script("arguments[0].click();", first_result)
                 logger.info("Clicked on first dropdown result using JavaScript")
             else:
@@ -325,30 +359,23 @@ class LandcheckerScraper:
             logger.info("Search submitted")
             
             # Wait for search results to load
-            self.random_delay(0.4, 0.6)  # Minimal but necessary wait
+            self.random_delay(self.page_load_delay, self.page_load_delay * 1.5)
             
-            # Fast check for property page indicators
+            # Check for property page indicators - from logs we know the direct element approach fails
+            # but checking page text works, so we'll use that directly
             try:
-                # Look for specific property details elements - first direct approach
-                property_details = self.wait_and_find_element(By.XPATH, "//div[contains(text(), 'PROPERTY DETAILS')]", timeout=0.8)
-                
-                if property_details:
-                    logger.info("Address found and property details section loaded")
-                    return True
-                
-                # Fallback: check page text for key indicators
                 page_text = self.driver.find_element(By.TAG_NAME, "body").text
                 property_indicators = ["PROPERTY DETAILS", "LOT/PLAN", "LAND SIZE", "PLANNING ZONE"]
                 
                 for indicator in property_indicators:
                     if indicator in page_text:
-                        logger.info(f"Found property indicator in page text: {indicator}")
+                        logger.info(f"Found property indicator in page text: '{indicator}'")
                         return True
                 
                 logger.error("Property details section not found after search")
                 return False
             except Exception as e:
-                logger.warning(f"Property page detection failed: {e}")
+                logger.error(f"Error checking for property indicators: {e}")
                 return False
                 
         except Exception as e:
@@ -356,67 +383,12 @@ class LandcheckerScraper:
             return False
     
     def get_zoning_info(self):
-        """Click on planning zone and extract the zoning title - optimized for speed but with improved popup waiting."""
+        """Click on planning zone and extract the zoning title."""
         logger.info("Attempting to get zoning information...")
         
         try:
-            # Define zone selectors in order of likely success
-            zone_selectors = [
-                # Specific selectors - check these first (usually faster)
-                "li[data-test='zoneOverlayInfo-listItem']",
-                "ul.MuiList-root.css-1uzmesd li",
-                # Generic selectors as fallbacks
-                "//div[text()='PLANNING ZONES']/following-sibling::div/div",
-                "//div[contains(@class, 'planning-zone')]",
-                "//div[contains(text(), 'PLANNING ZONE')]/following-sibling::div"
-            ]
-            
-            # Fast parallel approach to find zone entry
-            zone_entry = None
-            
-            # Try CSS selectors first (generally faster)
-            for selector in [s for s in zone_selectors if not s.startswith("//")]:
-                try:
-                    zones = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for zone in zones:
-                        if zone.is_displayed() and len(zone.text.strip()) > 0:
-                            zone_entry = zone
-                            logger.info(f"Found zone entry: {zone.text}")
-                            break
-                    if zone_entry:
-                        break
-                except Exception:
-                    continue
-            
-            # Try XPath if CSS didn't work
-            if not zone_entry:
-                for selector in [s for s in zone_selectors if s.startswith("//")]:
-                    try:
-                        zones = self.driver.find_elements(By.XPATH, selector)
-                        for zone in zones:
-                            if zone.is_displayed() and len(zone.text.strip()) > 0:
-                                zone_entry = zone
-                                logger.info(f"Found zone entry: {zone.text}")
-                                break
-                        if zone_entry:
-                            break
-                    except Exception:
-                        continue
-            
-            # Pattern-based search as last resort
-            if not zone_entry:
-                # Common zone codes
-                zone_patterns = ["MU1", "MU2", "IN1", "IN2", "SP", "R1", "R2", "B1", "B2", "E1", "E2"]
-                
-                for pattern in zone_patterns:
-                    elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{pattern}')]")
-                    for element in elements:
-                        if element.is_displayed() and len(element.text.strip()) > 0:
-                            zone_entry = element
-                            logger.info(f"Found zone entry through pattern search: {element.text}")
-                            break
-                    if zone_entry:
-                        break
+            # Based on logs, this is the only selector that reliably works for finding the zone entry
+            zone_entry = self.wait_and_find_element(By.CSS_SELECTOR, "li[data-test='zoneOverlayInfo-listItem']")
             
             if not zone_entry:
                 logger.error("No planning zone entry found")
@@ -424,126 +396,52 @@ class LandcheckerScraper:
             
             # Get the zone text before clicking (fallback)
             zone_text = zone_entry.text.strip()
-            logger.info(f"Planning zone entry text: {zone_text}")
+            logger.info(f"Planning zone entry text: '{zone_text}'")
             
-            # Click on the planning zone entry to open the popup - direct JavaScript
+            # Click on the planning zone entry to open the popup
             logger.info("Clicking on planning zone entry to open popup...")
             self.driver.execute_script("arguments[0].click();", zone_entry)
             
-            # *** IMPORTANT FIX: Increased wait time for popup to fully load ***
-            self.random_delay(0.5, 0.7)  # Increased wait time for popup to appear
+            # Wait for popup to fully load
+            self.random_delay(self.popup_wait, self.popup_wait * 1.5)
             
-            # *** IMPORTANT FIX: Add explicit wait for dialog to appear ***
+            # Add explicit wait for dialog to appear
             try:
                 # Wait for dialog to be present in DOM
-                WebDriverWait(self.driver, 1.5).until(
+                WebDriverWait(self.driver, self.std_timeout).until(
                     EC.presence_of_element_located((By.CSS_SELECTOR, "div[role='dialog'], div[role='presentation']"))
                 )
                 logger.info("Popup dialog appeared successfully")
             except TimeoutException:
-                logger.warning("Timed out waiting for popup dialog, will try to continue anyway")
+                logger.warning(f"Timed out waiting for popup dialog, will try to continue anyway")
             
-            # Fast approach to get title - check dialog text directly first
+            # From logs, we know that searching for <div> elements containing the zone text works best
             popup_title = None
             
-            # *** IMPORTANT FIX: More comprehensive dialog detection ***
-            dialog_elements = []
-            for selector in ["div[role='dialog']", "div[role='presentation']", "div.MuiDialog-paper"]:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    dialog_elements.extend([e for e in elements if e.is_displayed()])
-                except Exception:
-                    pass
-            
-            # Search for zone info in dialog text
-            for dialog in dialog_elements:
-                try:
-                    dialog_text = dialog.text
-                    logger.info(f"Dialog text found: {dialog_text[:100]}...")  # Log first 100 chars
-                    
-                    # Look for lines containing zone codes and descriptions
-                    lines = dialog_text.split('\n')
-                    
-                    # First try to find a line with both zone code and description 
-                    for line in lines:
-                        # Check for full zoning title (code followed by description)
-                        if (zone_text in line and len(line) > len(zone_text) + 5) or \
-                           (any(f"{zone_text} -" in line for zone_text in ["E1", "R1", "B1", "MU1"])):
-                            popup_title = line.strip()
-                            logger.info(f"Found complete zoning title in dialog: {popup_title}")
-                            break
-                            
-                    # If no complete title found, look for any paragraph with zone code
-                    if not popup_title:
-                        for line in lines:
-                            if zone_text in line and len(line) > 3:  # Avoid just the code itself
-                                popup_title = line.strip()
-                                logger.info(f"Found partial zoning info in dialog: {popup_title}")
-                                break
-                                
-                    if popup_title:
-                        break
-                except Exception as e:
-                    logger.warning(f"Dialog text extraction error: {e}")
-            
-            # Try specific element selectors if dialog approach failed
-            if not popup_title:
-                # Dialog title selectors
-                title_selectors = [
-                    "div[data-test='zoneOverlayInfoDialog-dialog'] p",
-                    "div[role='dialog'] p",
-                    "div[role='dialog'] h2",
-                    "div[role='dialog'] h3",
-                    "//div[@role='dialog']//p",
-                ]
+            try:
+                # Find all div elements
+                div_elements = self.driver.find_elements(By.TAG_NAME, "div")
                 
-                for selector in title_selectors:
+                # Look for a div that starts with the zone text and is longer than just the code
+                for div in div_elements:
                     try:
-                        if selector.startswith("//"):
-                            elements = self.driver.find_elements(By.XPATH, selector)
-                        else:
-                            elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        
-                        for element in elements:
-                            if element.is_displayed():
-                                title_text = element.text.strip()
-                                # Check for zone indicators
-                                zone_indicators = ["MU", "IN", "SP", "R", "B", "E",
-                                                 "Local Centre", "Light Industrial", "Mixed Use"]
-                                if title_text and (zone_text in title_text or any(i in title_text for i in zone_indicators)):
-                                    popup_title = title_text
-                                    logger.info(f"Found popup title in element: {popup_title}")
-                                    break
-                        if popup_title:
-                            break
-                    except Exception:
+                        if div.is_displayed():
+                            text = div.text.strip()
+                            if (text.startswith(zone_text) and len(text) > len(zone_text) + 3):
+                                popup_title = text
+                                logger.info(f"Found zoning title in div element: '{popup_title}'")
+                                break
+                    except:
                         continue
-            
-            # *** IMPORTANT FIX: Try to capture the full zoning title ***
-            if not popup_title:
-                # Look for any h1, h2, h3, or div containing the zone code
-                for tag in ["h1", "h2", "h3", "div", "span", "p"]:
-                    try:
-                        elements = self.driver.find_elements(By.TAG_NAME, tag)
-                        for element in elements:
-                            if element.is_displayed():
-                                elem_text = element.text.strip()
-                                # Look for zone code at start of text (like "E1 - Local Centre")
-                                if elem_text.startswith(zone_text) and len(elem_text) > len(zone_text) + 3:
-                                    popup_title = elem_text
-                                    logger.info(f"Found zoning title in {tag}: {popup_title}")
-                                    break
-                        if popup_title:
-                            break
-                    except Exception:
-                        continue
+            except Exception as e:
+                logger.warning(f"Error finding zoning title in divs: {e}")
             
             # Fall back to the zone text if popup title extraction failed
             if not popup_title and zone_text:
                 popup_title = zone_text
-                logger.info(f"Using zone text as fallback: {popup_title}")
+                logger.info(f"Using zone text as fallback: '{popup_title}'")
             
-            # Close the popup quickly
+            # Close the popup
             self.close_popup()
             
             return popup_title or None
@@ -554,6 +452,7 @@ class LandcheckerScraper:
     
     def close(self):
         """Close the browser and release resources."""
+        logger.info("Closing browser")
         if hasattr(self, 'driver') and self.driver:
             try:
                 self.driver.quit()
@@ -580,7 +479,10 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
     if progress_callback is None:
         def progress_callback(percentage, message):
             return True  # Always continue
-        
+    
+    logger.info(f"Starting property zoning lookup for {len(addresses)} addresses")
+    logger.info(f"Headless mode: {headless}")
+    
     scraper = LandcheckerScraper(headless=headless)
     results = {}
     
@@ -630,15 +532,19 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
             
             # Store the result
             if zoning_info:
+                logger.info(f"Found zoning for {address}: {zoning_info}")
                 results[address] = zoning_info
             else:
+                logger.warning(f"No zoning found for {address}")
                 results[address] = "-"
             
             # Return to search for next address (if not the last one)
             if address != addresses[-1]:
+                logger.debug(f"Returning to search for next address")
                 scraper.return_to_search()
-                scraper.random_delay(0.15, 0.25)  # Minimal wait before next search
+                scraper.random_delay(scraper.page_load_delay / 2, scraper.page_load_delay)
         
+        logger.info(f"Zoning lookup complete. Found zoning for {sum(1 for v in results.values() if v != '-')}/{len(addresses)} addresses")
         return results
         
     except Exception as e:

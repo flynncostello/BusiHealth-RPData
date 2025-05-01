@@ -22,8 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("rpdata_scraper.log")
+        logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
