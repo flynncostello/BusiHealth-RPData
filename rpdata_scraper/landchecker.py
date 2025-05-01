@@ -193,6 +193,17 @@ class LandcheckerScraper:
             # Randomize the starting URL slightly to avoid patterns
             if random.random() > 0.5:
                 self.driver.get("https://app.landchecker.com.au/")
+                logger.info(f"Current URL after loading: {self.driver.current_url}")
+
+                # Print out a sample of the HTML to see if it's a block page or error
+                html = self.driver.page_source
+                logger.info("First 1000 characters of page source:\n" + html[:1000])
+
+                # Optional: Detect block keywords
+                block_indicators = ["access denied", "are you a robot", "403", "cloudflare", "bot detection"]
+                if any(keyword.lower() in html.lower() for keyword in block_indicators):
+                    logger.warning("⚠️ Possible bot block detected in page source!")
+
                 time.sleep(random.uniform(2.0, 4.0))
                 self.driver.get(self.login_url)
             else:
