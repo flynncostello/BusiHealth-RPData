@@ -205,6 +205,7 @@ class LandcheckerScraper:
                 return False
             self.human_like_typing(email_field, email)
             self.random_delay()
+            
 
             password_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#password")
             if not password_field:
