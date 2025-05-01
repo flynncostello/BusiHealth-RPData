@@ -191,6 +191,14 @@ class LandcheckerScraper:
 
             logger.info("Login page loaded")
 
+            try:
+                body_text = self.driver.find_element(By.TAG_NAME, "body").text
+                logger.warning("===== BODY TEXT START =====")
+                logger.warning(body_text[:3000])  # log first 3000 chars for readability
+                logger.warning("===== BODY TEXT END =====")
+            except Exception as e:
+                logger.error(f"Could not retrieve page body text: {e}")
+
             email_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#email")
             if not email_field:
                 logger.error("Email field not found")
