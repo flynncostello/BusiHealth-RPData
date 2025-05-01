@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Installation - pip install selenium webdriver-manager undetected-chromedriver requests beautifulsoup4
+# Installation - pip install selenium webdriver-manager requests beautifulsoup4
 
 import time
 import random
@@ -26,13 +26,14 @@ logger = logging.getLogger(__name__)
 
 class LandcheckerScraper:
     def __init__(self, headless=False, download_dir=None):
-        """Initialize the scraper with Undetected ChromeDriver."""
+        """Initialize the scraper with ChromeDriver."""
         # Use a safe default download path if not provided
         if download_dir is None:
             download_dir = os.path.join(os.getcwd(), "downloads")
 
         # Make sure the directory exists
         os.makedirs(download_dir, exist_ok=True)
+        self.download_dir = download_dir
 
         # Add environment detection early
         self.is_cloud = any([
@@ -44,23 +45,19 @@ class LandcheckerScraper:
             os.environ.get('RUNNING_IN_AZURE') == 'true'  # Custom flag you can set
         ])
         
-        # CRITICAL FIX: Override headless parameter in Azure to use non-headless mode
-        # This is because we've confirmed headless=False works locally
-        original_headless = headless
-        if self.is_cloud and headless:
-            headless = False
-            logger.info(f"Running in Azure - forcing non-headless mode (was: {original_headless})")
-        
-        self.download_dir = download_dir
+        # Let chrome_utils handle the headless mode
+        # It will automatically force headless=True in container environments
         logger.info(f"Setting up Chrome driver with headless={headless}...")
         self.driver = setup_chrome_driver(headless=headless, download_dir=self.download_dir)
         
-        # Critical fix for Azure and Cloudflare protection
-        # Longer wait time in cloud environments
-        wait_time = 10 if self.is_cloud else 5
+        # Critical wait for browser initialization
+        wait_time = 12 if self.is_cloud else 6
         logger.info(f"Waiting {wait_time}s for browser to fully initialize...")
         time.sleep(wait_time)
         logger.info("Browser initialization complete")
+        
+        # Add human-like behaviors
+        self.enable_human_behavior()
         
         self.login_url = "https://app.landchecker.com.au/login"
         
@@ -68,30 +65,45 @@ class LandcheckerScraper:
         
         # Set timeouts based on environment
         if self.is_cloud:
-            # Much longer timeouts for cloud environments
-            self.std_timeout = 15     # Standard timeout
+            # Longer timeouts for cloud environments
+            self.std_timeout = 20     # Standard timeout
             self.min_delay = 1.0      # Minimum delay
-            self.max_delay = 2.0      # Maximum delay
-            self.page_load_delay = 6.0  # Page load delay
+            self.max_delay = 3.0      # Maximum delay with more randomness
+            self.page_load_delay = 8.0  # Page load delay
             self.typing_delay_min = 0.01  # Typing delay min
-            self.typing_delay_max = 0.03  # Typing delay max
-            self.popup_wait = 4.0     # Wait for popup
-            self.search_dropdown_wait = 3.0  # Wait for search dropdown
-            self.click_retry_delay = 1.0  # Delay between click retries
+            self.typing_delay_max = 0.05  # Typing delay max (more human-like)
+            self.popup_wait = 5.0     # Wait for popup
+            self.search_dropdown_wait = 4.0  # Wait for search dropdown
+            self.click_retry_delay = 1.5  # Delay between click retries
             logger.info("Using extended timeouts for cloud environment")
         else:
-            # Keep existing fast timeouts for local environment
-            self.std_timeout = 2      # Increased from 1 to 2
-            self.min_delay = 0.03
-            self.max_delay = 0.05
-            self.page_load_delay = 0.5  # Increased from 0.3 to 0.5
-            self.typing_delay_min = 0.003
-            self.typing_delay_max = 0.008
-            self.popup_wait = 0.7     # Increased from 0.5 to 0.7
-            self.search_dropdown_wait = 0.2
-            self.click_retry_delay = 0.05
+            # Slightly increased timeouts for local environment
+            self.std_timeout = 3      # Standard timeout
+            self.min_delay = 0.05     # Minimum delay
+            self.max_delay = 0.2      # Maximum delay
+            self.page_load_delay = 0.8  # Page load delay
+            self.typing_delay_min = 0.005  # Typing delay min
+            self.typing_delay_max = 0.01   # Typing delay max
+            self.popup_wait = 1.0     # Wait for popup
+            self.search_dropdown_wait = 0.5  # Wait for search dropdown
+            self.click_retry_delay = 0.1  # Delay between click retries
             logger.info("Using standard timeouts for local environment")
-        
+    
+    def enable_human_behavior(self):
+        """Add random mouse movements and scrolling to appear more human-like."""
+        try:
+            # Add random scrolling behavior script
+            self.driver.execute_script("""
+                window._humanScroll = function() {
+                    const scrollAmounts = [100, 200, 300, 150, 250];
+                    const scrollAmount = scrollAmounts[Math.floor(Math.random() * scrollAmounts.length)];
+                    window.scrollBy(0, scrollAmount);
+                }
+            """)
+            logger.info("Human behavior simulation enabled")
+        except Exception as e:
+            logger.warning(f"Could not enable human behavior simulation: {e}")
+            
     def random_delay(self, min_sec=None, max_sec=None):
         """Add a random delay between actions."""
         if min_sec is None:
@@ -111,10 +123,17 @@ class LandcheckerScraper:
         # Clear any existing value while preserving focus
         self.driver.execute_script("arguments[0].value = '';", element)
         
-        # Type with random delays
-        for char in text:
+        # Type with random delays and occasional pauses
+        for i, char in enumerate(text):
             element.send_keys(char)
-            time.sleep(random.uniform(self.typing_delay_min, self.typing_delay_max))
+            # Random typing speed
+            delay = random.uniform(self.typing_delay_min, self.typing_delay_max)
+            
+            # Add occasional longer pause (like a human thinking)
+            if i > 0 and i % random.randint(5, 10) == 0:
+                delay *= random.uniform(2, 5)
+                
+            time.sleep(delay)
     
     def wait_and_find_element(self, by, value, timeout=None):
         """Wait for an element to be present and return it."""
@@ -171,9 +190,21 @@ class LandcheckerScraper:
         logger.info(f"Attempting to log in with email: {email}")
         
         try:
-            # Navigate to login page
-            self.driver.get(self.login_url)
-            self.random_delay(self.page_load_delay, self.page_load_delay * 1.5)
+            # Randomize the starting URL slightly to avoid patterns
+            if random.random() > 0.5:
+                self.driver.get("https://app.landchecker.com.au/")
+                time.sleep(random.uniform(2.0, 4.0))
+                self.driver.get(self.login_url)
+            else:
+                self.driver.get(self.login_url)
+            
+            # Random scroll before login
+            self.driver.execute_script("if(window._humanScroll) window._humanScroll();")
+            
+            # Extended wait after page load
+            wait_time = random.uniform(self.page_load_delay, self.page_load_delay * 1.5)
+            logger.info(f"Waiting {wait_time:.1f}s for login page to fully load...")
+            time.sleep(wait_time)
             
             logger.info("Login page loaded")
             
@@ -223,7 +254,7 @@ class LandcheckerScraper:
                 )
                 logger.info(f"Login successful - redirected to: {self.driver.current_url}")
                 
-                # Wait for dashboard to load
+                # Wait for dashboard to load with random timing
                 self.random_delay(self.page_load_delay, self.page_load_delay * 1.5)
                 
                 return True
@@ -470,7 +501,7 @@ class LandcheckerScraper:
                 logger.error(f"Error closing browser: {e}")
 
 
-def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Landchecker 2025", headless=False, progress_callback=None):
+def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Landchecker 2025", headless=True, progress_callback=None):
     """
     Get zoning information for multiple properties.
     
@@ -478,7 +509,7 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
         addresses (list): List of property addresses to search for
         email (str): Login email
         password (str): Login password
-        headless (bool): Whether to run browser in headless mode
+        headless (bool): Whether to run browser in headless mode (will be forced to True in containers)
         progress_callback (function): Optional callback to check for cancellation
     
     Returns:
@@ -490,7 +521,7 @@ def get_property_zonings(addresses, email="daniel@busivet.com.au", password="Lan
             return True  # Always continue
     
     logger.info(f"Starting property zoning lookup for {len(addresses)} addresses")
-    logger.info(f"Headless mode: {headless}")
+    logger.info(f"Headless mode requested: {headless}")
     
     scraper = LandcheckerScraper(headless=headless)
     results = {}
@@ -591,9 +622,8 @@ def test_landchecker():
         "4/594 INKERMAN ROAD, CAULFIELD NORTH, VIC"
     ]
     
-    # Determine headless mode
-    is_docker = os.environ.get('RUNNING_IN_DOCKER', 'false').lower() == 'true'
-    headless = is_docker  # Use headless in Docker, otherwise interactive
+    # Default to headless mode for consistency
+    headless = True
     
     # Get zoning information
     results = get_property_zonings(test_addresses, headless=headless)

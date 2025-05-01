@@ -40,8 +40,7 @@ logging.basicConfig(
     level=logging.DEBUG,  # Changed from INFO to DEBUG for more details
     format='%(asctime)s - %(levelname)s - %(name)s - [%(filename)s:%(lineno)d] - %(message)s',
     handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_filename)
+        logging.StreamHandler(sys.stdout)
     ]
 )
 logger = logging.getLogger(__name__)
