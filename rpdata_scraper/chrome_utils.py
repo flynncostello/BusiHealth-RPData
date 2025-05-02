@@ -109,11 +109,11 @@ def setup_chrome_driver(headless=True, download_dir=None):
             # Headless mode for Azure with software rendering for WebGL
             if headless:
                 options.add_argument("--headless=new")
-                # Configure WebGL support
-                options.add_argument("--use-gl=angle")  # Better WebGL compatibility
-                options.add_argument("--use-angle=default")
+                options.add_argument("--use-gl=angle")
+                options.add_argument("--use-angle=swiftshader")  # <- THIS is the key one!
                 options.add_argument("--enable-webgl")
                 options.add_argument("--ignore-gpu-blocklist")
+
         
         # Container but not Azure (like local Docker)
         elif is_container:
