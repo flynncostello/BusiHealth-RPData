@@ -48,12 +48,31 @@ def setup_chrome_driver(headless=True, download_dir=None):
         options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
         options.add_argument("--window-size=1920,1080")
         
+        # Initialize prefs dictionary early
+        prefs = {
+            "download.default_directory": download_dir if download_dir else "/tmp",
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": False,
+            "plugins.always_open_pdf_externally": True,
+            # Additional performance preferences
+            "profile.default_content_setting_values.images": 2,  # Don't load images
+            "profile.default_content_setting_values.cookies": 1,  # Accept cookies
+            "profile.managed_default_content_settings.javascript": 1,  # Enable JavaScript
+            # Network timeouts
+            "network.tcp.connect_timeout_ms": 10000  # 10 seconds
+        }
+        
         # Special configuration for Azure that focuses on performance and stability
         if is_azure:
             logger.info("Using Azure-specific Chrome configuration")
 
-            # Add these specific settings for Azure
-            options.page_load_strategy = 'eager'  # Don't wait for all resources
+            # Set page load strategy to eager
+            options.page_load_strategy = 'eager'
+            
+            # Critical for WebGL in Azure
+            options.add_argument("--disable-gpu-sandbox")
+            options.add_argument("--disable-web-security")
             
             # Add more critical rendering settings
             options.add_argument("--disable-hang-monitor")
@@ -61,12 +80,8 @@ def setup_chrome_driver(headless=True, download_dir=None):
             
             # These help with site loading in Azure
             options.add_argument("--disable-popup-blocking")
-            options.add_argument("--blink-settings=imagesEnabled=false")  # Disable image loading
             options.add_argument("--disable-notifications")
             
-            # Set up page to load without waiting for resources
-            options.add_experimental_option("prefs", prefs)
-
             # Critical settings for Azure
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-setuid-sandbox")
@@ -91,14 +106,12 @@ def setup_chrome_driver(headless=True, download_dir=None):
             options.add_argument("--disable-threaded-scrolling")
             options.add_argument("--disable-threaded-animation")
             
-            # Faster page loading
-            options.page_load_strategy = 'eager'  # Don't wait for all resources
-            
             # Headless mode for Azure with software rendering for WebGL
             if headless:
                 options.add_argument("--headless=new")
-                # Instead of disabling WebGL, use swiftshader for low-performance environments
-                options.add_argument("--use-gl=swiftshader")
+                # Configure WebGL support
+                options.add_argument("--use-gl=angle")  # Better WebGL compatibility
+                options.add_argument("--use-angle=default")
                 options.add_argument("--enable-webgl")
                 options.add_argument("--ignore-gpu-blocklist")
         
@@ -107,9 +120,11 @@ def setup_chrome_driver(headless=True, download_dir=None):
             logger.info("Using general container Chrome configuration")
             if headless:
                 options.add_argument("--headless=new")
-                options.add_argument("--ignore-gpu-blocklist")
+                # Configure WebGL support
+                options.add_argument("--use-gl=angle")  # Better WebGL compatibility
+                options.add_argument("--use-angle=default")
                 options.add_argument("--enable-webgl")
-                options.add_argument("--use-gl=swiftshader")
+                options.add_argument("--ignore-gpu-blocklist")
             else:
                 # For debugging in non-headless containers
                 options.add_argument("--ignore-gpu-blocklist")
@@ -120,13 +135,16 @@ def setup_chrome_driver(headless=True, download_dir=None):
             if headless:
                 options.add_argument("--headless=new")
                 if is_macos:
-                    # MacOS headless mode settings
-                    options.add_argument("--use-gl=swiftshader")
+                    # MacOS headless mode settings for better WebGL
+                    options.add_argument("--disable-gpu-sandbox")
+                    options.add_argument("--use-gl=angle")  # Better than swiftshader on macOS
+                    options.add_argument("--use-angle=metal")  # Use Metal backend on macOS
                     options.add_argument("--enable-webgl")
                     options.add_argument("--ignore-gpu-blocklist")
                 else:
                     # Non-macOS headless mode settings
-                    options.add_argument("--use-gl=swiftshader")
+                    options.add_argument("--use-gl=angle")
+                    options.add_argument("--use-angle=default")
                     options.add_argument("--enable-webgl")
                     options.add_argument("--ignore-gpu-blocklist")
             else:
@@ -143,21 +161,11 @@ def setup_chrome_driver(headless=True, download_dir=None):
                 except Exception as e:
                     logger.warning(f"Could not set permissions on download directory: {e}")
 
-            prefs = {
-                "download.default_directory": download_dir,
-                "download.prompt_for_download": False,
-                "download.directory_upgrade": True,
-                "safebrowsing.enabled": False,
-                "plugins.always_open_pdf_externally": True,
-                # Additional performance preferences
-                "profile.default_content_setting_values.images": 2,  # Don't load images
-                "profile.default_content_setting_values.cookies": 1,  # Accept cookies
-                "profile.managed_default_content_settings.javascript": 1,  # Enable JavaScript
-                # Network timeouts
-                "network.tcp.connect_timeout_ms": 10000,  # 10 seconds
-                "network.stream.max_retries": 5
-            }
-            options.add_experimental_option("prefs", prefs)
+            # Update the download directory path in prefs
+            prefs["download.default_directory"] = download_dir
+
+        # Apply prefs to options
+        options.add_experimental_option("prefs", prefs)
 
         logger.info("Chrome Options:")
         for arg in options.arguments:
@@ -181,30 +189,121 @@ def setup_chrome_driver(headless=True, download_dir=None):
             # This reduces connection pool timeouts
             os.environ['PYTHONASYNCIODEBUG'] = '0'
             
-            # Create Chrome driver with adjusted timeout settings
-            chrome_args = {"service": service, "options": options}
-            driver = webdriver.Chrome(**chrome_args)
-        else:
-            driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
-
+        # Create Chrome driver
+        driver = webdriver.Chrome(service=service, options=options)
         driver.set_window_size(1920, 1080)
         
         # Set shorter timeouts to prevent hanging
         driver.set_page_load_timeout(60)  # 60 second page load timeout
         driver.set_script_timeout(30)     # 30 second script execution timeout
         
-        # For all environments, use a simple stealth script
+        # Enhanced WebGL spoofing script that tricks sites into thinking WebGL is available
+        webgl_spoofing_script = """
+        // Basic automation hiding
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        
+        // Comprehensive WebGL spoofing to trick detection scripts
+        (function() {
+            // Create fake successful WebGL context
+            const getContext = HTMLCanvasElement.prototype.getContext;
+            HTMLCanvasElement.prototype.getContext = function(contextType, contextAttributes) {
+                if (contextType === 'webgl' || contextType === 'experimental-webgl' || 
+                    contextType === 'webgl2' || contextType === 'experimental-webgl2') {
+                    
+                    const gl = getContext.apply(this, [contextType, contextAttributes]);
+                    if (gl === null) {
+                        // If real WebGL failed, create a fake one
+                        console.log('Creating fake WebGL context');
+                        const fakeWebGLContext = {
+                            canvas: this,
+                            drawingBufferWidth: this.width,
+                            drawingBufferHeight: this.height,
+                            getParameter: function(parameter) { 
+                                // Fake WebGL capabilities and parameters
+                                switch(parameter) {
+                                    case 0x1F00: return 'WebKit'; // VENDOR
+                                    case 0x1F01: return 'WebKit WebGL'; // RENDERER
+                                    case 0x1F02: return 'WebGL 1.0'; // VERSION
+                                    case 7936: return 'WebKit'; // VENDOR
+                                    case 7937: return 'WebKit WebGL'; // RENDERER
+                                    case 7938: return 'WebGL 1.0'; // VERSION
+                                    case 35724: return 'WebGL GLSL ES 1.0'; // SHADING_LANGUAGE_VERSION
+                                    case 0x9245: return 16; // MAX_TEXTURE_MAX_ANISOTROPY_EXT
+                                    default: return 0;
+                                }
+                            },
+                            getSupportedExtensions: function() {
+                                return [
+                                    'ANGLE_instanced_arrays',
+                                    'EXT_blend_minmax',
+                                    'EXT_color_buffer_half_float',
+                                    'EXT_frag_depth',
+                                    'EXT_shader_texture_lod',
+                                    'EXT_texture_filter_anisotropic',
+                                    'OES_element_index_uint',
+                                    'OES_standard_derivatives',
+                                    'OES_texture_float',
+                                    'OES_texture_float_linear',
+                                    'OES_texture_half_float',
+                                    'OES_texture_half_float_linear',
+                                    'OES_vertex_array_object',
+                                    'WEBGL_color_buffer_float',
+                                    'WEBGL_compressed_texture_s3tc',
+                                    'WEBGL_depth_texture',
+                                    'WEBGL_draw_buffers'
+                                ];
+                            },
+                            getExtension: function() { return {}; },
+                            createBuffer: function() { return {}; },
+                            createFramebuffer: function() { return {}; },
+                            createProgram: function() { return {}; },
+                            createRenderbuffer: function() { return {}; },
+                            createShader: function() { return {}; },
+                            createTexture: function() { return {}; },
+                            enable: function() {},
+                            disable: function() {},
+                            viewport: function() {},
+                            clearColor: function() {},
+                            clear: function() {},
+                            // Add minimal functions needed
+                            isContextLost: function() { return false; }
+                        };
+                        return fakeWebGLContext;
+                    }
+                    return gl;
+                }
+                return getContext.apply(this, arguments);
+            };
+        })();
+        
+        // Fake WebGL detection methods many sites use
+        window.WebGLRenderingContext = window.WebGLRenderingContext || function() {};
+        
+        // Make isWebGLAvailable() functions return true
+        window._isWebGLAvailable = true;
+        window.isWebGLAvailable = function() { return true; };
+        
+        // Override canvas fingerprinting
+        HTMLCanvasElement.prototype.toDataURL = function() {
+            return "data:image/png;base64,fakecanvasfingerprint==";
+        };
+        """
+        
         try:
-            # Only one critical automation flag - keep it minimal
-            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
-            logger.info("Successfully injected basic stealth scripts")
+            # Inject the enhanced WebGL spoofing script for better compatibility
+            driver.execute_script(webgl_spoofing_script)
+            logger.info("Successfully injected enhanced WebGL spoofing script")
         except Exception as e:
             # If script fails, log but continue
-            logger.warning(f"Stealth script injection failed, but continuing: {e}")
+            logger.warning(f"WebGL script injection failed, but continuing: {e}")
 
         if headless and download_dir:
             try:
-                driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'allow', 'downloadPath': download_dir})
+                # Fix the download behavior command to include downloadPath
+                driver.execute_cdp_cmd('Page.setDownloadBehavior', {
+                    'behavior': 'allow',
+                    'downloadPath': download_dir
+                })
             except Exception as e:
                 logger.warning(f"CDP download behavior setup failed: {e}")
 

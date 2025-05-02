@@ -137,57 +137,144 @@ class LandcheckerScraper:
         return False
     
     def login(self, email, password):
-        """Log in to the Landchecker website with improved timeout handling."""
+        """Log in to the Landchecker website with WebGL detection bypass."""
         logger.info(f"Logging in with email: {email}")
         
         try:
-            # Set a shorter page load timeout to prevent indefinite hanging
+            # Set a shorter page load timeout
             self.driver.set_page_load_timeout(30)
             
             logger.info(f"Attempting to navigate to login URL: {self.login_url}")
             
             try:
-                # Use a more responsive page load strategy
-                self.driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'allow'})
-                
-                # Navigate to login page with a try-except to catch timeout
+                # Use a more responsive navigation approach
                 self.driver.get(self.login_url)
                 logger.info("Navigation command sent successfully")
             except Exception as nav_error:
                 logger.error(f"Navigation error: {nav_error}")
                 
-                # Try an alternative approach to navigate
+                # Try JavaScript navigation as fallback
                 logger.info("Trying alternative navigation approach")
                 try:
-                    # Execute JavaScript to navigate instead of driver.get()
                     self.driver.execute_script(f"window.location.href = '{self.login_url}';")
                     logger.info("JavaScript navigation executed")
-                    
-                    # Give it a moment to start loading
                     time.sleep(3)
                 except Exception as js_error:
                     logger.error(f"JavaScript navigation error: {js_error}")
                     return False
             
-            # Check what we got - log the current URL
-            try:
-                current_url = self.driver.current_url
-                logger.info(f"Current URL after navigation attempt: {current_url}")
-                
-                # Try to get page title
-                page_title = self.driver.title
-                logger.info(f"Page title: {page_title}")
-                
-                # Check if we can access the body
-                try:
-                    body_text = self.driver.find_element(By.TAG_NAME, 'body').text
-                    logger.info(f"Body text preview: {body_text[:200] if body_text else 'Empty body'}")
-                except Exception as body_error:
-                    logger.error(f"Could not access body: {body_error}")
-            except Exception as url_error:
-                logger.error(f"Could not access page details: {url_error}")
+            # Check what we got
+            current_url = self.driver.current_url
+            logger.info(f"Current URL after navigation: {current_url}")
             
-            # Wait for login elements with explicit timeouts
+            # Get page title
+            page_title = self.driver.title
+            logger.info(f"Page title: {page_title}")
+            
+            # Check if we hit the WebGL detection page
+            try:
+                body_text = self.driver.find_element(By.TAG_NAME, 'body').text
+                logger.info(f"Body text preview: {body_text[:200] if body_text else 'Empty body'}")
+                
+                # If we hit the WebGL not supported page, try to bypass it
+                if "Browser Not Supported" in page_title or "WebGL" in body_text and "not" in body_text:
+                    logger.info("Detected WebGL support page, attempting to bypass...")
+                    
+                    # Inject enhanced WebGL spoofing script
+                    webgl_spoof_script = """
+                    // Create fake WebGL context that passes detection
+                    (function() {
+                        // Create a canvas element
+                        var canvas = document.createElement('canvas');
+                        document.body.appendChild(canvas);
+                        
+                        // Force WebGL to be detected as available
+                        window.WebGLRenderingContext = window.WebGLRenderingContext || {};
+                        window.WebGL2RenderingContext = window.WebGL2RenderingContext || {};
+                        
+                        // Override any isWebGLAvailable functions
+                        window._webGLAvailable = true;
+                        window.isWebGLAvailable = function() { return true; };
+                        window.hasWebGL = function() { return true; };
+                        
+                        // If there's a specific button to continue, click it
+                        setTimeout(function() {
+                            var continueButtons = document.querySelectorAll('button, a');
+                            for(var i=0; i < continueButtons.length; i++) {
+                                var btn = continueButtons[i];
+                                if(btn.innerText && (
+                                    btn.innerText.toLowerCase().includes('continue') ||
+                                    btn.innerText.toLowerCase().includes('proceed') ||
+                                    btn.innerText.toLowerCase().includes('login')
+                                )) {
+                                    console.log('Clicking continue button: ' + btn.innerText);
+                                    btn.click();
+                                    break;
+                                }
+                            }
+                        }, 1000);
+                        
+                        // Try to navigate directly to login page
+                        setTimeout(function() {
+                            window.location.href = "https://app.landchecker.com.au/login";
+                        }, 2000);
+                    })();
+                    """
+                    
+                    # Execute the bypass script
+                    self.driver.execute_script(webgl_spoof_script)
+                    logger.info("Executed WebGL bypass script")
+                    
+                    # Wait for script to complete and page to change
+                    time.sleep(3)
+                    
+                    # Check if we're now on the login page
+                    current_url = self.driver.current_url
+                    page_title = self.driver.title
+                    logger.info(f"URL after bypass attempt: {current_url}")
+                    logger.info(f"Title after bypass attempt: {page_title}")
+                    
+                    # If we're still on the WebGL page, try direct cookie setting approach
+                    if "Browser Not Supported" in page_title:
+                        logger.info("Still on WebGL page, trying cookie approach...")
+                        
+                        # Set a cookie to skip WebGL check
+                        cookie_script = """
+                        document.cookie = "bypassWebGLCheck=true; path=/; domain=.landchecker.com.au";
+                        document.cookie = "webglEnabled=true; path=/; domain=.landchecker.com.au";
+                        localStorage.setItem('webglEnabled', 'true');
+                        localStorage.setItem('bypassWebGLCheck', 'true');
+                        
+                        // Try to navigate again
+                        window.location.href = "https://app.landchecker.com.au/login";
+                        """
+                        
+                        self.driver.execute_script(cookie_script)
+                        logger.info("Set bypass cookies and tried navigation again")
+                        time.sleep(3)
+                        
+                        # Check if we're now on the login page
+                        current_url = self.driver.current_url
+                        logger.info(f"URL after cookie attempt: {current_url}")
+                    
+                    # If still not on login page, try opening new tab
+                    if "login" not in current_url.lower():
+                        logger.info("Still not on login page, trying new tab approach...")
+                        
+                        # Open login page in new tab
+                        self.driver.execute_script(f"window.open('{self.login_url}', '_blank');")
+                        
+                        # Switch to new tab
+                        self.driver.switch_to.window(self.driver.window_handles[-1])
+                        time.sleep(2)
+                        
+                        current_url = self.driver.current_url
+                        logger.info(f"URL in new tab: {current_url}")
+                
+            except Exception as body_error:
+                logger.error(f"Error checking page content: {body_error}")
+            
+            # Wait for login elements
             logger.info("Looking for login elements...")
             try:
                 WebDriverWait(self.driver, 10).until(
@@ -202,7 +289,7 @@ class LandcheckerScraper:
             email_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#email")
             
             if email_field:
-                # Use direct send_keys instead of human_like_typing for reliability
+                # Use direct send_keys for reliability
                 email_field.clear()
                 email_field.send_keys(email)
                 logger.info("Email entered")
