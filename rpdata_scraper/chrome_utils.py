@@ -48,40 +48,54 @@ def setup_chrome_driver(headless=True, download_dir=None):
         options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
         options.add_argument("--window-size=1920,1080")
         
-        # Add timeouts to prevent hanging
-        options.add_argument("--browser-process-hint-timeout=60")
-        
-        # WebGL configurations - critical flags to enable WebGL in headless mode
-        if headless:
-            # Set headless mode with the new syntax
-            options.add_argument("--headless=new")
+        # Configure Chrome for Azure App Service containers
+        if is_azure:
+            logger.info("Using Azure-specific Chrome configuration")
+            # Critical for Azure: We need these for stability but must keep WebGL working
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--disable-setuid-sandbox")
+            options.add_argument("--disable-breakpad")  # Disable crash reporting
             
-            # Critical WebGL flags
+            # These settings stabilize the renderer without disabling WebGL
             options.add_argument("--ignore-gpu-blocklist")
             options.add_argument("--enable-webgl")
-            options.add_argument("--use-gl=angle")  # Use ANGLE backend for better compatibility
+            options.add_argument("--use-gl=swiftshader")  # Software rendering for WebGL
             
-            # macOS specific flags to help with WebGL in headless
-            if is_macos:
-                options.add_argument("--use-angle=metal")  # Use Metal on macOS
-            else:
-                # Non-macOS flags
-                options.add_argument("--use-angle=swiftshader")  # Software rendering fallback
-            
-            # Additional flags to improve WebGL support
-            options.add_argument("--in-process-gpu")  # Run GPU process in same process
-            options.add_argument("--disable-features=IsolateOrigins,site-per-process")
-            options.add_argument("--disable-site-isolation-trials")
-        else:
-            # For non-headless mode
-            if is_macos:
+            # Headless mode configuration for Azure
+            if headless:
+                options.add_argument("--headless=new")
+        
+        # Container but not Azure (like local Docker)
+        elif is_container:
+            logger.info("Using general container Chrome configuration")
+            if headless:
+                options.add_argument("--headless=new")
                 options.add_argument("--ignore-gpu-blocklist")
                 options.add_argument("--enable-webgl")
-                options.add_argument("--use-angle=metal")  # Use Metal on macOS
-            else:
-                options.add_argument("--enable-webgl")
-                options.add_argument("--ignore-gpu-blocklist")
                 options.add_argument("--use-gl=swiftshader")
+            else:
+                # For debugging in non-headless containers
+                options.add_argument("--ignore-gpu-blocklist")
+                options.add_argument("--enable-webgl")
+        
+        # Local environment (macOS or other)
+        else:
+            if headless:
+                options.add_argument("--headless=new")
+                if is_macos:
+                    # MacOS headless mode settings
+                    options.add_argument("--use-gl=swiftshader")
+                    options.add_argument("--enable-webgl")
+                    options.add_argument("--ignore-gpu-blocklist")
+                else:
+                    # Non-macOS headless mode settings
+                    options.add_argument("--use-gl=swiftshader")
+                    options.add_argument("--enable-webgl")
+                    options.add_argument("--ignore-gpu-blocklist")
+            else:
+                # Non-headless mode for local environments
+                options.add_argument("--ignore-gpu-blocklist")
+                options.add_argument("--enable-webgl")
 
         if download_dir:
             download_dir = os.path.abspath(download_dir)
@@ -105,76 +119,53 @@ def setup_chrome_driver(headless=True, download_dir=None):
         for arg in options.arguments:
             logger.info(f"  {arg}")
 
-        # Set reasonable timeouts to prevent hangs but allow WebGL initialization
+        # Create driver with appropriate service
         service = Service(executable_path="/usr/bin/chromedriver") if is_container else None
         
-        # Create the Chrome driver
-        if service:
-            driver = webdriver.Chrome(service=service, options=options)
+        # For Azure, add an environment variable that might help with renderer issues
+        if is_azure:
+            logger.info("Setting special environment variables for Azure")
+            os.environ['CHROME_HEADLESS'] = '1'
+            os.environ['PYTHONUNBUFFERED'] = '1'
+            
+            # Create Chrome driver with adjusted timeout settings
+            chrome_args = {"service": service, "options": options}
+            driver = webdriver.Chrome(**chrome_args)
         else:
-            driver = webdriver.Chrome(options=options)
+            driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
 
         driver.set_window_size(1920, 1080)
         
-        # Set script timeout with a reasonable value (60s)
-        driver.set_script_timeout(60)
+        # Set reasonable timeout for script execution
+        driver.set_script_timeout(30)
         
-        # Enhanced stealth script with specific WebGL support
-        webgl_script = """
-        // Hide automation
-        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-        Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
-        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-
-        // Enhanced WebGL spoofing to ensure site detects WebGL as available
-        try {
-            // Add dummy WebGL detection
-            const getParameter = WebGLRenderingContext.prototype.getParameter;
-            WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                // UNMASKED_VENDOR_WEBGL
-                if (parameter === 37445) return "Intel Inc.";
-                // UNMASKED_RENDERER_WEBGL
-                if (parameter === 37446) return "Intel(R) UHD Graphics 630";
-                return getParameter.apply(this, arguments);
-            };
-            
-            // Create a dummy canvas and initialize WebGL to ensure it's available
-            const canvas = document.createElement('canvas');
-            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-            if (gl) {
-                console.log('WebGL is available in this browser');
-                
-                // This ensures GPU process starts correctly
-                gl.clearColor(0.0, 0.0, 0.0, 1.0);
-                gl.clear(gl.COLOR_BUFFER_BIT);
-            } else {
-                console.log('WebGL not available, using fallback');
-            }
-        } catch (e) {
-            console.error('Error setting up WebGL:', e);
-        }
-        
-        // More stealth techniques
-        HTMLCanvasElement.prototype.toDataURL = function() {
-            return "data:image/png;base64,fakecanvasfingerprint==";
-        };
-        
-        const originalQuery = navigator.permissions.query;
-        navigator.permissions.query = parameters => (
-            parameters.name === 'notifications'
-                ? Promise.resolve({ state: Notification.permission })
-                : originalQuery(parameters)
-        );
-        """
-        
+        # For all environments, use a simple and reliable stealth script
         try:
-            # Execute with a specific timeout
-            driver.set_script_timeout(30)
-            driver.execute_script(webgl_script)
-            logger.info("Successfully injected WebGL support scripts")
+            # Basic stealth script that should work in all environments
+            driver.execute_script("""
+            // Hide automation flags
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            """)
+            
+            # Only add more complex JS for non-Azure environments
+            if not is_azure:
+                driver.execute_script("""
+                // More comprehensive stealth
+                Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                
+                // Simple canvas fingerprint protection
+                if (typeof HTMLCanvasElement !== 'undefined') {
+                    HTMLCanvasElement.prototype.toDataURL = function() {
+                        return "data:image/png;base64,fakecanvasfingerprint==";
+                    };
+                }
+                """)
+            
+            logger.info("Successfully injected basic stealth scripts")
         except Exception as e:
             # If script fails, log but continue
-            logger.warning(f"WebGL script injection failed, but continuing: {e}")
+            logger.warning(f"Stealth script injection failed, but continuing: {e}")
 
         if headless and download_dir:
             try:
