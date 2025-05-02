@@ -170,13 +170,14 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             return True  # Signal to continue processing
         
         # Call main function from rpdata_scraper with job-specific directories
+        logger.info(f"About to start MAIN, headless={headless}")
         result = main(
             locations=locations,
             property_types=property_types,
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             business_type=business_type,
-            headless=headless,
+            headless=True,# Should be headless=headless, normally
             progress_callback=progress_callback,
             download_dir=download_dir,
             output_dir=output_dir

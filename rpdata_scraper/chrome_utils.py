@@ -47,21 +47,41 @@ def setup_chrome_driver(headless=True, download_dir=None):
         options.add_experimental_option("useAutomationExtension", False)
         options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
         options.add_argument("--window-size=1920,1080")
-
-        if is_macos:
-            options.add_argument("--ignore-gpu-blocklist")
-            options.add_argument("--enable-webgl")
-            options.add_argument("--disable-gpu-sandbox")
-        else:
-            options.add_argument("--disable-gpu")
-            options.add_argument("--enable-webgl")
-            options.add_argument("--ignore-gpu-blocklist")
-            options.add_argument("--use-gl=swiftshader")
-
+        
+        # Add timeouts to prevent hanging
+        options.add_argument("--browser-process-hint-timeout=60")
+        
+        # WebGL configurations - critical flags to enable WebGL in headless mode
         if headless:
+            # Set headless mode with the new syntax
             options.add_argument("--headless=new")
+            
+            # Critical WebGL flags
+            options.add_argument("--ignore-gpu-blocklist")
+            options.add_argument("--enable-webgl")
+            options.add_argument("--use-gl=angle")  # Use ANGLE backend for better compatibility
+            
+            # macOS specific flags to help with WebGL in headless
+            if is_macos:
+                options.add_argument("--use-angle=metal")  # Use Metal on macOS
+            else:
+                # Non-macOS flags
+                options.add_argument("--use-angle=swiftshader")  # Software rendering fallback
+            
+            # Additional flags to improve WebGL support
+            options.add_argument("--in-process-gpu")  # Run GPU process in same process
             options.add_argument("--disable-features=IsolateOrigins,site-per-process")
             options.add_argument("--disable-site-isolation-trials")
+        else:
+            # For non-headless mode
+            if is_macos:
+                options.add_argument("--ignore-gpu-blocklist")
+                options.add_argument("--enable-webgl")
+                options.add_argument("--use-angle=metal")  # Use Metal on macOS
+            else:
+                options.add_argument("--enable-webgl")
+                options.add_argument("--ignore-gpu-blocklist")
+                options.add_argument("--use-gl=swiftshader")
 
         if download_dir:
             download_dir = os.path.abspath(download_dir)
@@ -85,33 +105,76 @@ def setup_chrome_driver(headless=True, download_dir=None):
         for arg in options.arguments:
             logger.info(f"  {arg}")
 
+        # Set reasonable timeouts to prevent hangs but allow WebGL initialization
         service = Service(executable_path="/usr/bin/chromedriver") if is_container else None
-        driver = webdriver.Chrome(service=service, options=options) if service else webdriver.Chrome(options=options)
+        
+        # Create the Chrome driver
+        if service:
+            driver = webdriver.Chrome(service=service, options=options)
+        else:
+            driver = webdriver.Chrome(options=options)
 
         driver.set_window_size(1920, 1080)
-
-        # Stealth: Navigator/WebGL spoofing
-        driver.execute_script("""
+        
+        # Set script timeout with a reasonable value (60s)
+        driver.set_script_timeout(60)
+        
+        # Enhanced stealth script with specific WebGL support
+        webgl_script = """
+        // Hide automation
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
         Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
 
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-            if (parameter === 37445) return "Intel Inc.";
-            if (parameter === 37446) return "Intel(R) UHD Graphics 630";
-            return getParameter(parameter);
-        };
+        // Enhanced WebGL spoofing to ensure site detects WebGL as available
+        try {
+            // Add dummy WebGL detection
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                // UNMASKED_VENDOR_WEBGL
+                if (parameter === 37445) return "Intel Inc.";
+                // UNMASKED_RENDERER_WEBGL
+                if (parameter === 37446) return "Intel(R) UHD Graphics 630";
+                return getParameter.apply(this, arguments);
+            };
+            
+            // Create a dummy canvas and initialize WebGL to ensure it's available
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (gl) {
+                console.log('WebGL is available in this browser');
+                
+                // This ensures GPU process starts correctly
+                gl.clearColor(0.0, 0.0, 0.0, 1.0);
+                gl.clear(gl.COLOR_BUFFER_BIT);
+            } else {
+                console.log('WebGL not available, using fallback');
+            }
+        } catch (e) {
+            console.error('Error setting up WebGL:', e);
+        }
+        
+        // More stealth techniques
         HTMLCanvasElement.prototype.toDataURL = function() {
             return "data:image/png;base64,fakecanvasfingerprint==";
         };
+        
         const originalQuery = navigator.permissions.query;
         navigator.permissions.query = parameters => (
             parameters.name === 'notifications'
                 ? Promise.resolve({ state: Notification.permission })
                 : originalQuery(parameters)
         );
-        """)
+        """
+        
+        try:
+            # Execute with a specific timeout
+            driver.set_script_timeout(30)
+            driver.execute_script(webgl_script)
+            logger.info("Successfully injected WebGL support scripts")
+        except Exception as e:
+            # If script fails, log but continue
+            logger.warning(f"WebGL script injection failed, but continuing: {e}")
 
         if headless and download_dir:
             try:

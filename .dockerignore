@@ -12,7 +12,6 @@ env/
 build/
 develop-eggs/
 dist/
-downloads/
 eggs/
 .eggs/
 lib/
@@ -32,10 +31,13 @@ venv/
 *.swp
 *.swo
 
-# Local directories
-downloads/
-merged_properties/
-tmp/
+# Local directories - ignore contents but keep directories with .gitkeep
+downloads/*
+!downloads/.gitkeep
+merged_properties/*
+!merged_properties/.gitkeep
+tmp/*
+!tmp/.gitkeep
 
 # Logs
 *.log
