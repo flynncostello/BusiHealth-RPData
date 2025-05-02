@@ -189,15 +189,22 @@ class RPDataScraper(RPDataBase):
             return False
     
     def login(self, username, password):
-        """Log in to the RP Data website."""
+        """Log in to the RP Data website with page body content logging."""
         logger.info("===== LOGGING IN TO RP DATA =====")
         
         try:
             # Navigate to login page
+            logger.info(f"Navigating to: {self.login_url}")
             self.driver.get(self.login_url)
-            self.random_delay(0.3, 0.5)  # Faster wait for page load
+            self.random_delay(0.3, 0.5)
             
-            logger.info("Login page loaded")
+            # Log the body content after navigation
+            try:
+                body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                body_text = body_element.text
+                logger.info(f"BODY CONTENT AFTER NAVIGATION: {body_text}")
+            except Exception as e:
+                logger.error(f"Error getting body content: {e}")
             
             # Find and fill username field
             username_field = self.wait_and_find_element(By.ID, "username")
@@ -209,7 +216,7 @@ class RPDataScraper(RPDataBase):
                 logger.error("Username field not found")
                 return False
             
-            self.random_delay(0.1, 0.2)  # Brief delay between fields
+            self.random_delay(0.1, 0.2)
             
             # Find and fill password field
             password_field = self.wait_and_find_element(By.ID, "password")
@@ -221,12 +228,13 @@ class RPDataScraper(RPDataBase):
                 logger.error("Password field not found")
                 return False
             
-            self.random_delay(0.1, 0.2)  # Brief delay before clicking
+            self.random_delay(0.1, 0.2)
             
             # Find and click login button
             login_button = self.wait_and_find_clickable(By.ID, "signOnButton")
             
             if login_button:
+                logger.info("About to click login button")
                 success = self.safe_click(login_button)
                 if not success:
                     logger.error("Failed to click the login button")
@@ -236,25 +244,63 @@ class RPDataScraper(RPDataBase):
                 logger.error("Login button not found")
                 return False
             
+            # Log body content immediately after clicking login
+            try:
+                time.sleep(2)  # Wait briefly for any immediate page changes
+                body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                body_text = body_element.text
+                logger.info(f"BODY CONTENT AFTER LOGIN CLICK: {body_text}")
+            except Exception as e:
+                logger.error(f"Error getting body content after login click: {e}")
+            
             # Wait for login to complete and redirect to dashboard
             try:
+                logger.info("Waiting for dashboard...")
+                
+                # Log body content periodically during wait
+                for i in range(1, 6):  # Check 5 times, every 5 seconds
+                    try:
+                        time.sleep(5)
+                        body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                        body_text = body_element.text
+                        logger.info(f"BODY CONTENT DURING WAIT ({i*5}s): {body_text}")
+                        
+                        # Check if we've reached the dashboard
+                        if "Start your search here" in body_text:
+                            logger.info("Dashboard detected in body text")
+                            break
+                    except Exception as e:
+                        logger.error(f"Error getting body content during wait {i}: {e}")
+                
                 # Wait for redirection to dashboard
-                WebDriverWait(self.driver, 10).until(
+                WebDriverWait(self.driver, 20).until(
                     lambda driver: "Start your search here" in driver.page_source
                 )
                 logger.info("Login successful - redirected to dashboard")
                 
                 # Brief wait after login
-                self.random_delay(0.5, 1.0)  # Faster wait after login
+                self.random_delay(0.5, 1.0)
                 
                 return True
-            except Exception as e:
-                logger.error(f"Login appears to have failed - dashboard not loaded after 10 seconds: {e}")
-                return False
+            except TimeoutException:
+                logger.error("Login appears to have failed - dashboard not loaded after timeout")
                 
+                # Log final body content at timeout
+                try:
+                    body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                    body_text = body_element.text
+                    logger.info(f"FINAL BODY CONTENT AT TIMEOUT: {body_text}")
+                except Exception as e:
+                    logger.error(f"Error getting final body content: {e}")
+                    
+                return False
+                    
         except Exception as e:
             logger.error(f"Login failed with exception: {e}")
             return False
+        
+
+
     
     def select_search_type(self, search_type):
         """Select the search type (Sales, For Sale, For Rent)."""

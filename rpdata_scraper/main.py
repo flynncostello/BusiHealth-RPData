@@ -260,7 +260,7 @@ if __name__ == "__main__":
     min_floor = "Min"
     max_floor = "1250"
     business_type = "Vet"
-    headless = False
+    headless = True
     
     # Run the entire process with job-specific directories
     output_location = main(

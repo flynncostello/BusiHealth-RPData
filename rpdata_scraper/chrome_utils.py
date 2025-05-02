@@ -48,22 +48,43 @@ def setup_chrome_driver(headless=True, download_dir=None):
         options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
         options.add_argument("--window-size=1920,1080")
         
-        # Configure Chrome for Azure App Service containers
+        # Special configuration for Azure that focuses on performance and stability
         if is_azure:
             logger.info("Using Azure-specific Chrome configuration")
-            # Critical for Azure: We need these for stability but must keep WebGL working
+            # Critical settings for Azure
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-setuid-sandbox")
             options.add_argument("--disable-breakpad")  # Disable crash reporting
             
-            # These settings stabilize the renderer without disabling WebGL
-            options.add_argument("--ignore-gpu-blocklist")
-            options.add_argument("--enable-webgl")
-            options.add_argument("--use-gl=swiftshader")  # Software rendering for WebGL
+            # Network and loading optimizations for Azure
+            options.add_argument("--disable-features=NetworkService,NetworkServiceInProcess")
+            options.add_argument("--disable-background-networking")
+            options.add_argument("--disable-default-apps")
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-sync")
+            options.add_argument("--disable-translate")
+            options.add_argument("--metrics-recording-only")
+            options.add_argument("--mute-audio")
+            options.add_argument("--no-first-run")
             
-            # Headless mode configuration for Azure
+            # Lower memory usage
+            options.add_argument("--disk-cache-size=33554432")  # 32MB disk cache
+            options.add_argument("--media-cache-size=33554432")  # 32MB media cache
+
+            # Performance improvements
+            options.add_argument("--disable-threaded-scrolling")
+            options.add_argument("--disable-threaded-animation")
+            
+            # Faster page loading
+            options.page_load_strategy = 'eager'  # Don't wait for all resources
+            
+            # Headless mode for Azure with software rendering for WebGL
             if headless:
                 options.add_argument("--headless=new")
+                # Instead of disabling WebGL, use swiftshader for low-performance environments
+                options.add_argument("--use-gl=swiftshader")
+                options.add_argument("--enable-webgl")
+                options.add_argument("--ignore-gpu-blocklist")
         
         # Container but not Azure (like local Docker)
         elif is_container:
@@ -111,7 +132,14 @@ def setup_chrome_driver(headless=True, download_dir=None):
                 "download.prompt_for_download": False,
                 "download.directory_upgrade": True,
                 "safebrowsing.enabled": False,
-                "plugins.always_open_pdf_externally": True
+                "plugins.always_open_pdf_externally": True,
+                # Additional performance preferences
+                "profile.default_content_setting_values.images": 2,  # Don't load images
+                "profile.default_content_setting_values.cookies": 1,  # Accept cookies
+                "profile.managed_default_content_settings.javascript": 1,  # Enable JavaScript
+                # Network timeouts
+                "network.tcp.connect_timeout_ms": 10000,  # 10 seconds
+                "network.stream.max_retries": 5
             }
             options.add_experimental_option("prefs", prefs)
 
@@ -122,11 +150,20 @@ def setup_chrome_driver(headless=True, download_dir=None):
         # Create driver with appropriate service
         service = Service(executable_path="/usr/bin/chromedriver") if is_container else None
         
-        # For Azure, add an environment variable that might help with renderer issues
+        # Configure timeouts for the service
+        service_args = []
+        if is_container:
+            service_args = ['--log-level=INFO']
+            if service:
+                service.service_args = service_args
+        
+        # For Azure, add environment variables that might help with performance
         if is_azure:
             logger.info("Setting special environment variables for Azure")
             os.environ['CHROME_HEADLESS'] = '1'
             os.environ['PYTHONUNBUFFERED'] = '1'
+            # This reduces connection pool timeouts
+            os.environ['PYTHONASYNCIODEBUG'] = '0'
             
             # Create Chrome driver with adjusted timeout settings
             chrome_args = {"service": service, "options": options}
@@ -136,32 +173,14 @@ def setup_chrome_driver(headless=True, download_dir=None):
 
         driver.set_window_size(1920, 1080)
         
-        # Set reasonable timeout for script execution
-        driver.set_script_timeout(30)
+        # Set shorter timeouts to prevent hanging
+        driver.set_page_load_timeout(60)  # 60 second page load timeout
+        driver.set_script_timeout(30)     # 30 second script execution timeout
         
-        # For all environments, use a simple and reliable stealth script
+        # For all environments, use a simple stealth script
         try:
-            # Basic stealth script that should work in all environments
-            driver.execute_script("""
-            // Hide automation flags
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            """)
-            
-            # Only add more complex JS for non-Azure environments
-            if not is_azure:
-                driver.execute_script("""
-                // More comprehensive stealth
-                Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});
-                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-                
-                // Simple canvas fingerprint protection
-                if (typeof HTMLCanvasElement !== 'undefined') {
-                    HTMLCanvasElement.prototype.toDataURL = function() {
-                        return "data:image/png;base64,fakecanvasfingerprint==";
-                    };
-                }
-                """)
-            
+            # Only one critical automation flag - keep it minimal
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
             logger.info("Successfully injected basic stealth scripts")
         except Exception as e:
             # If script fails, log but continue
