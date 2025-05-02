@@ -64,13 +64,6 @@ def setup_chrome_driver(headless=True, download_dir=None):
             options.add_argument("--blink-settings=imagesEnabled=false")  # Disable image loading
             options.add_argument("--disable-notifications")
             
-            # Add timeout preferences
-            prefs.update({
-                "browser.tabs.loadTimeout": 30000,  # 30 seconds
-                "browser.connection.timeout": 30000,  # 30 seconds
-                "dom.timeout.max_consecutive_callbacks_ms": 30000,  # 30 seconds
-            })
-            
             # Set up page to load without waiting for resources
             options.add_experimental_option("prefs", prefs)
 
