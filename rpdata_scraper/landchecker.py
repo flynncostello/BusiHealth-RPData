@@ -137,22 +137,74 @@ class LandcheckerScraper:
         return False
     
     def login(self, email, password):
-        """Log in to the Landchecker website."""
+        """Log in to the Landchecker website with improved timeout handling."""
         logger.info(f"Logging in with email: {email}")
         
         try:
-            # Go directly to login page
-            self.driver.get(self.login_url)
+            # Set a shorter page load timeout to prevent indefinite hanging
+            self.driver.set_page_load_timeout(30)
             
-            # Wait for login page to load
-            time.sleep(1)
-            logger.info("Login page loaded")
+            logger.info(f"Attempting to navigate to login URL: {self.login_url}")
             
+            try:
+                # Use a more responsive page load strategy
+                self.driver.execute_cdp_cmd('Page.setDownloadBehavior', {'behavior': 'allow'})
+                
+                # Navigate to login page with a try-except to catch timeout
+                self.driver.get(self.login_url)
+                logger.info("Navigation command sent successfully")
+            except Exception as nav_error:
+                logger.error(f"Navigation error: {nav_error}")
+                
+                # Try an alternative approach to navigate
+                logger.info("Trying alternative navigation approach")
+                try:
+                    # Execute JavaScript to navigate instead of driver.get()
+                    self.driver.execute_script(f"window.location.href = '{self.login_url}';")
+                    logger.info("JavaScript navigation executed")
+                    
+                    # Give it a moment to start loading
+                    time.sleep(3)
+                except Exception as js_error:
+                    logger.error(f"JavaScript navigation error: {js_error}")
+                    return False
+            
+            # Check what we got - log the current URL
+            try:
+                current_url = self.driver.current_url
+                logger.info(f"Current URL after navigation attempt: {current_url}")
+                
+                # Try to get page title
+                page_title = self.driver.title
+                logger.info(f"Page title: {page_title}")
+                
+                # Check if we can access the body
+                try:
+                    body_text = self.driver.find_element(By.TAG_NAME, 'body').text
+                    logger.info(f"Body text preview: {body_text[:200] if body_text else 'Empty body'}")
+                except Exception as body_error:
+                    logger.error(f"Could not access body: {body_error}")
+            except Exception as url_error:
+                logger.error(f"Could not access page details: {url_error}")
+            
+            # Wait for login elements with explicit timeouts
+            logger.info("Looking for login elements...")
+            try:
+                WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_element_located((By.ID, "email"))
+                )
+                logger.info("Login form found successfully")
+            except Exception as form_error:
+                logger.error(f"Login form not found: {form_error}")
+                return False
+                
             # Find and fill email field
             email_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#email")
             
             if email_field:
-                self.human_like_typing(email_field, email)
+                # Use direct send_keys instead of human_like_typing for reliability
+                email_field.clear()
+                email_field.send_keys(email)
                 logger.info("Email entered")
             else:
                 logger.error("Email field not found")
@@ -164,7 +216,8 @@ class LandcheckerScraper:
             password_field = self.wait_and_find_element(By.CSS_SELECTOR, "input#password")
             
             if password_field:
-                self.human_like_typing(password_field, password)
+                password_field.clear()
+                password_field.send_keys(password)
                 logger.info("Password entered")
             else:
                 logger.error("Password field not found")
@@ -185,19 +238,19 @@ class LandcheckerScraper:
                 logger.error("Login button not found")
                 return False
             
-            # Wait for login to complete and dashboard to load
+            # Wait for login to complete
             try:
                 # Wait for redirection away from login page
-                WebDriverWait(self.driver, self.std_timeout).until(
+                WebDriverWait(self.driver, 15).until(
                     lambda driver: "login" not in driver.current_url.lower()
                 )
                 logger.info(f"Login successful - redirected to: {self.driver.current_url}")
                 time.sleep(2)
                 return True
-            except TimeoutException:
-                logger.error(f"Login appears to have failed - still on login page after {self.std_timeout} seconds")
+            except Exception as redirect_error:
+                logger.error(f"Login redirect failed: {redirect_error}")
                 return False
-                
+                    
         except Exception as e:
             logger.error(f"Login failed with exception: {e}")
             return False

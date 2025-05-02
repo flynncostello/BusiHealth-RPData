@@ -51,6 +51,29 @@ def setup_chrome_driver(headless=True, download_dir=None):
         # Special configuration for Azure that focuses on performance and stability
         if is_azure:
             logger.info("Using Azure-specific Chrome configuration")
+
+            # Add these specific settings for Azure
+            options.page_load_strategy = 'eager'  # Don't wait for all resources
+            
+            # Add more critical rendering settings
+            options.add_argument("--disable-hang-monitor")
+            options.add_argument("--disable-crash-reporter")
+            
+            # These help with site loading in Azure
+            options.add_argument("--disable-popup-blocking")
+            options.add_argument("--blink-settings=imagesEnabled=false")  # Disable image loading
+            options.add_argument("--disable-notifications")
+            
+            # Add timeout preferences
+            prefs.update({
+                "browser.tabs.loadTimeout": 30000,  # 30 seconds
+                "browser.connection.timeout": 30000,  # 30 seconds
+                "dom.timeout.max_consecutive_callbacks_ms": 30000,  # 30 seconds
+            })
+            
+            # Set up page to load without waiting for resources
+            options.add_experimental_option("prefs", prefs)
+
             # Critical settings for Azure
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-setuid-sandbox")
