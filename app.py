@@ -177,7 +177,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             business_type=business_type,
-            headless=True,# Should be headless=headless, normally
+            headless=headless,# Should be headless=headless, normally
             progress_callback=progress_callback,
             download_dir=download_dir,
             output_dir=output_dir
