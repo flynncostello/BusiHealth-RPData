@@ -1,5 +1,5 @@
-# Use official Python base image with AMD64 architecture
-FROM python:3.9-slim-bullseye
+# Force platform to AMD64 to match Chrome & Chromedriver architecture
+FROM --platform=linux/amd64 python:3.9-slim-bullseye
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -9,7 +9,7 @@ ENV DISPLAY=:99
 ENV DOCKER_CONTAINER=true
 ENV CHROME_VERSION=135.0.7049.95
 
-# Install system dependencies
+# Install required system dependencies
 RUN apt-get update && apt-get install -y \
     wget gnupg curl unzip xvfb x11vnc xterm \
     libxi6 libgconf-2-4 libexif-dev \
@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
     libatk1.0-0 libcups2 libdbus-1-3 libgdk-pixbuf2.0-0 \
     libgtk-3-0 libnspr4 libnss3 libxcomposite1 \
     libxdamage1 libxfixes3 libxrandr2 libxss1 libxtst6 \
-    libgbm1 libjpeg-dev libpng-dev \
+    libgbm1 libjpeg-dev libpng-dev libxext6 libx11-xcb1 libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Chrome for Testing (v135)
@@ -29,7 +29,7 @@ RUN mkdir -p /opt/chrome \
     && ln -s /opt/chrome/chrome /usr/bin/google-chrome \
     && rm -rf chrome-linux64.zip chrome-linux64
 
-# Install matching ChromeDriver (v135)
+# Install matching Chromedriver
 RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip \
     && unzip chromedriver-linux64.zip \
     && mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
@@ -40,19 +40,19 @@ RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VE
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
+# Copy and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create directories and set permissions
+# Create required directories
 RUN mkdir -p /app/downloads /app/merged_properties /app/tmp \
     && chmod -R 777 /app/downloads /app/merged_properties /app/tmp
 
-# Copy app source code
+# Copy app source
 COPY . .
 
-# Expose the Flask app port
+# Expose app port
 EXPOSE 8000
 
-# Run using Gunicorn directly (no entrypoint.sh)
+# Start Flask app via Gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app"]
