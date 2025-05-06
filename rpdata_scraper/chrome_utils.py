@@ -4,6 +4,7 @@
 import os
 import sys
 import time
+import uuid
 import random
 import logging
 import traceback
@@ -19,19 +20,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Use CHROME_BINARY environment variable (fallback to AMD64 path)
+CHROME_BINARY = os.environ.get("CHROME_BINARY", "/opt/chrome/chrome")
+CHROMEDRIVER_PATH = os.environ.get("CHROMEDRIVER_PATH", "/usr/bin/chromedriver")
+
 def setup_chrome_driver(headless=True, download_dir=None):
-    #headless = False
     try:
         logger.info("Setting up Chrome driver (Docker-only)...")
 
         options = Options()
-        import uuid
         tmp_profile = f"/tmp/chrome-user-data-{uuid.uuid4()}"
         options.add_argument(f"--user-data-dir={tmp_profile}")
-
-
         options.headless = headless
-        options.binary_location = "/opt/chrome/chrome"
+        options.binary_location = CHROME_BINARY
 
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
@@ -57,8 +58,6 @@ def setup_chrome_driver(headless=True, download_dir=None):
         if headless:
             options.add_argument("--headless=new")
 
-
-
         if download_dir:
             download_dir = os.path.abspath(download_dir)
             os.makedirs(download_dir, exist_ok=True)
@@ -71,12 +70,12 @@ def setup_chrome_driver(headless=True, download_dir=None):
         for arg in options.arguments:
             logger.info(f"  {arg}")
 
-        service = Service(executable_path="/usr/bin/chromedriver")
+        service = Service(executable_path=CHROMEDRIVER_PATH)
         driver = webdriver.Chrome(service=service, options=options)
-
         driver.set_page_load_timeout(60)
         driver.set_script_timeout(30)
 
+        # WebGL spoofing
         spoof_script = """
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         (function() {
@@ -108,6 +107,7 @@ def setup_chrome_driver(headless=True, download_dir=None):
         except Exception as e:
             logger.warning(f"WebGL spoof injection failed: {e}")
 
+        # Set download behavior (only in headless mode)
         if headless and download_dir:
             try:
                 driver.execute_cdp_cmd("Page.setDownloadBehavior", {
