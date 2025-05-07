@@ -162,14 +162,31 @@ if %errorlevel% neq 0 (
     echo [WARNING] Failed to upgrade setuptools/wheel, but continuing...
 )
 
+echo [INFO] ==================== REQUIREMENTS INSTALLATION DIAGNOSTICS ====================
+echo [DEBUG] Current directory: %CD%
+echo [DEBUG] Script directory: %~dp0
+echo [DEBUG] Listing files in current directory:
+dir
+echo [DEBUG] Checking for requirements file:
+if exist requirements.txt (echo [DEBUG] requirements.txt file found!) else (echo [DEBUG] requirements.txt file NOT found!)
+if exist requirements (echo [DEBUG] requirements file (without .txt) found!) else (echo [DEBUG] requirements file (without .txt) NOT found!)
+echo [DEBUG] ==========================================================================
+echo.
+
 echo [ACTION] Installing required packages (this may take several minutes)...
 echo (Package installation progress will be displayed below)
-python -m pip install -r requirements
+python -m pip install -r "%~dp0requirements"
 if %errorlevel% neq 0 (
-    echo [ERROR] Failed to install required packages.
-    echo Check the error messages above for details.
-    pause
-    exit /b 1
+    echo [ERROR] Failed to install requirements with "%~dp0requirements".
+    echo [ACTION] Trying alternative path...
+    python -m pip install -r "%~dp0requirements.txt"
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to install required packages.
+        echo Check the error messages above for details.
+        echo [DEBUG] Try creating a file named 'requirements.txt' with your package list.
+        pause
+        exit /b 1
+    )
 )
 echo [SUCCESS] All required packages installed.
 echo.
