@@ -139,8 +139,8 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Downloaded files: {result_files}")
 
         # Add delay to ensure files are completely written
-        logger.info("Waiting 2 seconds for files to finalize...")
-        time.sleep(2)  # 2 second delay
+        logger.info("Waiting 3 seconds for files to finalize...")
+        time.sleep(3)  # 3 second delay
         
         # Check for cancellation again
         if progress_callback(42, "Files downloaded, starting merge process...") is False:

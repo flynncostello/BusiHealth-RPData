@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Merges Excel files from RP Data into a single file
+# Updated to support job-specific directories for multi-user isolation
 
 import os
 import logging
@@ -11,6 +12,9 @@ from openpyxl.styles import Font
 from datetime import datetime
 from collections import Counter
 import time
+
+from landchecker import get_property_zonings  # Import the zoning lookup function
+from check_zoning_use import check_zoning_use  # Import the zoning use checker function
 
 # Set up logging
 logging.basicConfig(
@@ -130,6 +134,45 @@ def extract_hyperlink(cell_content):
             
     return cell_content
 
+def normalize_address(address):
+    """
+    Normalize address to make matching more reliable by removing common variations.
+    
+    Args:
+        address (str): The address to normalize
+        
+    Returns:
+        str: Normalized address
+    """
+    if not address:
+        return ""
+        
+    # Convert to uppercase
+    address = address.upper()
+    
+    # Replace multiple spaces with a single space
+    address = re.sub(r'\s+', ' ', address)
+    
+    # Remove redundant commas and spaces around them
+    address = re.sub(r'\s*,\s*', ',', address)
+    
+    # Remove trailing/leading commas and spaces
+    address = address.strip(', ')
+    
+    # Remove unit/floor designations that might vary
+    address = re.sub(r'^(UNIT|FLOOR|SUITE|SHOP|GROUND FLOOR|GF)[\s/]+\d+[/]?', '', address)
+    
+    # Remove "GROUND FLOOR" or similar prefixes
+    address = re.sub(r'^(GROUND FLOOR|GF)[/]', '', address)
+    
+    # Remove state abbreviation variations
+    address = address.replace(', NSW,', ',').replace(' NSW ', ' ')
+    
+    # Remove postal code if it exists to make matching easier
+    address = re.sub(r'\s*\d{4}\s*$', '', address)
+    
+    return address.strip()
+
 def generate_filename(locations, property_types, min_floor, max_floor, output_dir=None):
     """
     Generate a filename based on search criteria and current date/time.
@@ -191,7 +234,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     logger.info("===== PROCESSING EXCEL FILES =====")
 
     # Check for cancellation at the start
-    if check_cancellation(progress_callback, 78, "Starting to process Excel files..."):
+    if check_cancellation(progress_callback, 48, "Starting to process Excel files..."):
         logger.info("Job cancelled at the start of Excel processing")
         return False
     
@@ -201,7 +244,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     
     try:
         # Check for cancellation before collecting data
-        if check_cancellation(progress_callback, 80, "Parsing Excel files..."):
+        if check_cancellation(progress_callback, 50, "Parsing Excel files..."):
             logger.info("Job cancelled before Excel parsing")
             return False
         
@@ -243,12 +286,20 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         for cell in ws[1]:
             cell.font = Font(bold=True, size=14)
 
-        # First pass: collect all rows
+        # First pass: collect all rows and addresses
         all_rows = []
+        all_addresses = []
         
-        logger.info("First pass: collecting all property data...")
+        # Count occurrences of each address to handle duplicates
+        address_counter = Counter()
+        # Map to store (address, count) -> row_index
+        address_to_row_index = {}
+        # Map to store normalized addresses
+        normalized_address_map = {}
         
-        progress_callback(85, "Extracting data from forSale, forRent and Sales...")
+        logger.info("First pass: collecting all property data and addresses...")
+        
+        progress_callback(48, "Extracting data from forSale, forRent and Sales...")
 
         row_index = 0
         for search_type, file_path in files_dict.items():
@@ -276,7 +327,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                 # Log column headers for debugging
                 logger.info(f"Columns in {search_type} file: {list(data_df.columns)}")
                 
-                # Process each row
+                # Process each row and collect addresses
                 for idx, row in data_df.iterrows():
                     new_row = ["N/A"] * len(headers)  # Initialize with N/A for all columns
                     
@@ -304,7 +355,27 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                     new_row[4] = state
                     new_row[5] = postcode
                     
-                    # Just set Site Zoning to empty string
+                    # Create full address for landchecker lookup
+                    full_address = f"{street_address}, {suburb}, {state}, {postcode}"
+                    full_address = full_address.strip().replace(", ,", ",").replace(",,", ",")
+                    
+                    # Only add address if we have enough information
+                    if street_address and suburb and state:
+                        # Count this address occurrence
+                        address_counter[full_address] += 1
+                        occurrence = address_counter[full_address]
+                        
+                        # Store unique address identifier (address with occurrence count)
+                        unique_address_key = (full_address, occurrence)
+                        
+                        all_addresses.append(full_address)
+                        address_to_row_index[unique_address_key] = row_index
+                        
+                        # Store normalized address mapping for better matching
+                        norm_address = normalize_address(full_address)
+                        normalized_address_map[norm_address] = full_address
+                    
+                    # Site Zoning will be filled in later
                     new_row[6] = ""
                     
                     new_row[7] = row.get("Property Type", "")
@@ -422,12 +493,120 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                 logger.error(f"Error processing file {file_path}: {e}")
                 import traceback
                 logger.error(traceback.format_exc())
+        
+        # Log duplicate addresses
+        for address, count in address_counter.items():
+            if count > 1:
+                logger.info(f"Duplicate address detected: '{address}' appears {count} times")
 
-        if check_cancellation(progress_callback, 90, "Processing property data..."):
-            logger.info("Job cancelled while processing property data")
+        # Add additional cancellation checks at key points
+        if check_cancellation(progress_callback, 60, "Collecting property data..."):
+            logger.info("Job cancelled while collecting property data")
+            return False
+
+        progress_callback(50, "Obtaining zoning info for all properties...")
+
+        # Second pass: get all zonings in one batch if we have addresses
+        if all_addresses:
+            logger.info(f"Second pass: getting zoning information for {len(all_addresses)} addresses in a single batch...")
+            
+            # Create a list of unique addresses to query
+            unique_addresses = list(set(all_addresses))
+            
+            # Call get_property_zonings with unique addresses
+            try:
+                logger.info(f"Getting zoning info for {len(unique_addresses)} unique addresses")
+                zonings_dict = get_property_zonings(unique_addresses, headless=headless, progress_callback=progress_callback)
+                logger.info(f"Successfully retrieved zoning info for {len(zonings_dict)} properties")
+                
+                # Create a mapping of normalized zonings addresses to their values
+                normalized_zonings = {}
+                for address, zoning in zonings_dict.items():
+                    normalized_zonings[normalize_address(address)] = zoning
+                
+                # Debug: Print all normalized addresses and their zonings
+                logger.info("Normalized address mappings for zoning lookups:")
+                for norm_addr, orig_addr in normalized_address_map.items():
+                    logger.info(f"Normalized: '{norm_addr}' --> Original: '{orig_addr}'")
+                
+                # Update rows with zoning information - using the unique address keys
+                processed_addresses = set()  # Keep track of which addresses we've already processed
+                
+                for address, count in address_counter.items():
+                    # Get the zoning for this address
+                    zoning = zonings_dict.get(address)
+                    
+                    # If direct match fails, try normalized match
+                    if not zoning:
+                        norm_address = normalize_address(address)
+                        zoning = normalized_zonings.get(norm_address)
+                        
+                        if zoning:
+                            logger.info(f"Found zoning through normalized address matching for {address}")
+                    
+                    # Apply zoning if we have a valid one
+                    if zoning and zoning != "-" and len(zoning) > 5:
+                        # Apply the zoning to all occurrences of this address
+                        for i in range(1, count + 1):
+                            unique_key = (address, i)
+                            if unique_key in address_to_row_index:
+                                row_idx = address_to_row_index[unique_key]
+                                logger.info(f"Applying zoning '{zoning}' to address '{address}' (occurrence {i})")
+                                
+                                # Update the row with zoning information
+                                all_rows[row_idx][6] = zoning
+                                processed_addresses.add(unique_key)
+                    else:
+                        # If we still don't have a zoning value, try fuzzy matching as last resort
+                        norm_address = normalize_address(address)
+                        for search_addr, search_zoning in zonings_dict.items():
+                            if search_zoning != "-" and len(search_zoning) > 5:
+                                norm_search = normalize_address(search_addr)
+                                # Simple partial matching - if the street address part matches
+                                if norm_address.split(',')[0] == norm_search.split(',')[0]:
+                                    # Apply the zoning to all occurrences of this address
+                                    for i in range(1, count + 1):
+                                        unique_key = (address, i)
+                                        if unique_key in address_to_row_index and unique_key not in processed_addresses:
+                                            row_idx = address_to_row_index[unique_key]
+                                            logger.info(f"Fuzzy match found! Applying zoning '{search_zoning}' to address '{address}' (occurrence {i})")
+                                            all_rows[row_idx][6] = search_zoning
+                                            processed_addresses.add(unique_key)
+                                    break
+                
+                # Log any addresses that didn't get zoning information
+                for unique_key in address_to_row_index.keys():
+                    if unique_key not in processed_addresses:
+                        address, occurrence = unique_key
+                        logger.warning(f"No zoning found for address: '{address}' (occurrence {occurrence})")
+                
+            except Exception as e:
+                logger.error(f"Error getting zoning information in batch: {e}")
+        else:
+            logger.warning("No valid addresses found for zoning lookup")
+
+        if check_cancellation(progress_callback, 70, "Getting zoning information..."):
+            logger.info("Job cancelled before getting zoning information")
             return False
         
-        progress_callback(95, "Writing all properties to final merged file...")
+        progress_callback(60, "Checking zoning table for allowable use...")
+
+        ########################################################################################################################
+        # TRYING TO SET AS MANY 'ALLOWABLE USE IN ZONE (T/F)' AS POSSIBLE
+        logger.info("===== CHECKING ZONING ALLOWANCES =====")
+        try:
+            all_rows = check_zoning_use(all_rows, business_type)
+            logger.info(f"Completed zoning allowance check for business type: {business_type}")
+        except Exception as e:
+            logger.error(f"Error checking zoning allowances: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+        if check_cancellation(progress_callback, 85, "Checking zoning allowances..."):
+            logger.info("Job cancelled before checking zoning allowances")
+            return False
+        
+        progress_callback(96, "Writing all properties to final merged file...")
 
         # Write all rows to the worksheet
         logger.info("Writing all rows to the output file...")
@@ -435,7 +614,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         # Current date for "Date Added" column
         today_str = datetime.now().strftime("%d/%m/%Y")
 
-        if check_cancellation(progress_callback, 97, "Writing to Excel file..."):
+        if check_cancellation(progress_callback, 95, "Writing to Excel file..."):
             logger.info("Job cancelled before writing Excel file")
             return False
         
