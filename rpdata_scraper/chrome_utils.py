@@ -317,7 +317,7 @@ def setup_chrome_driver(headless=True, download_dir=None):
         sys.exit(1)
 
 
-def random_wait(min_seconds=0.5, max_seconds=1):
+def random_wait(min_seconds=0.5, max_seconds=2):
     wait_time = min_seconds + random.random() * (max_seconds - min_seconds)
     time.sleep(wait_time)
     return wait_time
