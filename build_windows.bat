@@ -10,7 +10,7 @@ echo Starting setup at: %TIME%
 echo.
 
 REM Check for administrative privileges
-echo [STEP 1/10] Checking for administrative privileges...
+echo [STEP 1/8] Checking for administrative privileges...
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo.
@@ -23,116 +23,28 @@ if %errorlevel% neq 0 (
 echo Admin check complete.
 echo.
 
-REM Check for Python installation
-echo [STEP 2/10] Checking for Python installation...
-where python >nul 2>&1
-IF %ERRORLEVEL% NEQ 0 (
-    echo [ALERT] Python is not installed or not in PATH.
-    echo.
-    echo Would you like to download and install Python now? (Y/N)
-    echo Type Y and press Enter to download and install, or N to skip:
-    set /p install_python=
-    
-    if /i "!install_python!"=="Y" (
-        echo.
-        echo [ACTION] Downloading Python installer...
-        curl -L -o python_installer.exe https://www.python.org/ftp/python/3.12.0/python-3.12.0-amd64.exe
-        
-        echo.
-        echo [ACTION] Installing Python (this may take a few minutes)...
-        echo (No progress indicator will appear during installation)
-        start /wait python_installer.exe /quiet InstallAllUsers=1 PrependPath=1 Include_test=0
-        
-        echo.
-        echo [INFO] Waiting for Python installation to complete...
-        timeout /t 5 /nobreak
-        
-        echo.
-        echo [ACTION] Cleaning up...
-        del python_installer.exe
-        
-        echo.
-        echo [CHECK] Verifying Python installation...
-        where python >nul 2>&1
-        IF %ERRORLEVEL% NEQ 0 (
-            echo [ERROR] Python installation failed. Please install manually.
-            pause
-            exit /b 1
-        ) else (
-            echo [SUCCESS] Python was installed successfully.
-        )
-    ) else (
-        echo.
-        echo [ACTION] Skipping Python installation.
-        echo Please install Python and run this script again.
-        echo You can download Python from https://www.python.org/downloads/
-        pause
-        exit /b 1
-    )
-) else (
-    echo [SUCCESS] Python is already installed.
-)
-echo.
-
-REM Check Python version
-echo [STEP 3/10] Checking Python version...
+REM Check Python version (Python is already installed manually)
+echo [STEP 2/8] Checking Python version...
 for /f "tokens=2" %%V in ('python --version 2^>^&1') do set "python_version=%%V"
 echo [INFO] Found Python version: %python_version%
 echo.
 
-REM Check for Google Chrome
-echo [STEP 4/10] Checking for Google Chrome...
+REM Check for Google Chrome - simplified to just detect, not install
+echo [STEP 3/8] Checking for Google Chrome...
 reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ALERT] Google Chrome is not installed.
-    echo.
-    echo Would you like to download and install Google Chrome now? (Y/N)
-    echo Type Y and press Enter to download and install, or N to skip:
-    set /p install_chrome=
-    
-    if /i "!install_chrome!"=="Y" (
-        echo.
-        echo [ACTION] Downloading Chrome installer...
-        curl -L -o chrome_installer.exe https://dl.google.com/chrome/install/latest/chrome_installer.exe
-        
-        echo.
-        echo [ACTION] Installing Chrome (this may take a few minutes)...
-        echo (No progress indicator will appear during installation)
-        start /wait chrome_installer.exe /silent /install
-        
-        echo.
-        echo [INFO] Waiting for Chrome installation to complete...
-        timeout /t 10 /nobreak
-        
-        echo.
-        echo [ACTION] Cleaning up...
-        del chrome_installer.exe
-        
-        echo.
-        echo [CHECK] Verifying Chrome installation...
-        reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" >nul 2>&1
-        if %errorlevel% neq 0 (
-            echo [ERROR] Chrome installation failed. Please install manually.
-            pause
-            exit /b 1
-        ) else (
-            echo [SUCCESS] Chrome was installed successfully.
-        )
-    ) else (
-        echo.
-        echo [ACTION] Skipping Chrome installation.
-        echo Please install Google Chrome and run this script again.
-        echo You can download Chrome from https://www.google.com/chrome/
-        pause
-        exit /b 1
-    )
+    echo [ERROR] Google Chrome is not installed.
+    echo Please install Google Chrome and run this script again.
+    echo You can download Chrome from https://www.google.com/chrome/
+    pause
+    exit /b 1
 ) else (
     echo [SUCCESS] Google Chrome is already installed.
 )
 echo.
 
 REM Find Chrome executable path
-echo [STEP 5/10] Finding Chrome executable path...
+echo [STEP 4/8] Finding Chrome executable path...
 for /f "tokens=*" %%a in ('reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" /ve ^| findstr "REG_SZ"') do (
     set chrome_path=%%a
 )
@@ -149,7 +61,7 @@ if not exist "%chrome_path%" (
 echo.
 
 REM Get Chrome version to find matching ChromeDriver
-echo [STEP 6/10] Getting Chrome version...
+echo [INFO] Getting Chrome version...
 echo [INFO] Running Chrome to get version info...
 for /f "tokens=3" %%v in ('"%chrome_path%" --version 2^>^&1') do (
     set chrome_version=%%v
@@ -171,7 +83,7 @@ echo [INFO] Chrome major version: %chrome_major%
 echo.
 
 REM Create required directories
-echo [STEP 7/10] Creating required directories...
+echo [STEP 5/8] Creating required directories...
 if not exist "downloads" (
     echo [ACTION] Creating downloads directory...
     mkdir downloads
@@ -209,7 +121,7 @@ echo [SUCCESS] Cleanup complete.
 echo.
 
 REM Create venv if it doesn't exist
-echo [STEP 8/10] Setting up Python virtual environment...
+echo [STEP 6/8] Setting up Python virtual environment...
 if not exist venv (
     echo [ACTION] Creating virtual environment...
     python -m venv venv
@@ -226,7 +138,7 @@ if not exist venv (
 echo.
 
 REM Activate environment and install requirements
-echo [STEP 9/10] Activating virtual environment...
+echo [STEP 7/8] Activating virtual environment...
 echo [ACTION] Running activation script...
 call venv\Scripts\activate.bat
 if %errorlevel% neq 0 (
@@ -263,7 +175,7 @@ echo [SUCCESS] All required packages installed.
 echo.
 
 REM Download the compatible ChromeDriver for Windows based on Chrome version
-echo [STEP 10/10] Downloading ChromeDriver...
+echo [STEP 8/8] Downloading ChromeDriver...
 echo [INFO] Checking for compatible ChromeDriver for Chrome %chrome_major%...
 
 REM First try the exact chrome version
