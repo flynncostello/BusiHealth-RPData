@@ -669,7 +669,7 @@ def test_landchecker():
     ]
     
     # Get zoning information
-    results = get_property_zonings(test_addresses, headless=True)
+    results = get_property_zonings(test_addresses, headless=False)
     
     # Format and display results
     formatted_results = format_zonings_dict(results)
