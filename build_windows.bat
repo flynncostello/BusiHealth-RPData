@@ -151,42 +151,30 @@ if %errorlevel% neq 0 (
 echo [SUCCESS] Virtual environment activated.
 echo.
 
-REM Check if requirements are already installed
-echo [INFO] Checking if required packages are already installed...
-set requirements_installed=0
-python -c "import flask, selenium, webdriver_manager" >nul 2>&1
-if %errorlevel% equ 0 (
-    echo [INFO] Core packages already installed, skipping pip install.
-    set requirements_installed=1
+REM Always install from requirements.txt - safer approach
+echo [INFO] Upgrading pip and installing requirements...
+echo [ACTION] Upgrading pip...
+python -m pip install --upgrade pip
+if %errorlevel% neq 0 (
+    echo [WARNING] Failed to upgrade pip, but continuing...
 )
 
-if %requirements_installed% equ 0 (
-    echo [INFO] Upgrading pip and installing requirements...
-    echo [ACTION] Upgrading pip...
-    python -m pip install --upgrade pip
-    if %errorlevel% neq 0 (
-        echo [WARNING] Failed to upgrade pip, but continuing...
-    )
-
-    echo [ACTION] Upgrading setuptools and wheel...
-    python -m pip install --upgrade setuptools wheel
-    if %errorlevel% neq 0 (
-        echo [WARNING] Failed to upgrade setuptools/wheel, but continuing...
-    )
-
-    echo [ACTION] Installing required packages (this may take several minutes)...
-    echo (Package installation progress will be displayed below)
-    python -m pip install -r requirements.txt
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to install required packages.
-        echo Check the error messages above for details.
-        pause
-        exit /b 1
-    )
-    echo [SUCCESS] All required packages installed.
-) else (
-    echo [SUCCESS] Using existing packages.
+echo [ACTION] Upgrading setuptools and wheel...
+python -m pip install --upgrade setuptools wheel
+if %errorlevel% neq 0 (
+    echo [WARNING] Failed to upgrade setuptools/wheel, but continuing...
 )
+
+echo [ACTION] Installing required packages (this may take several minutes)...
+echo (Package installation progress will be displayed below)
+python -m pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to install required packages.
+    echo Check the error messages above for details.
+    pause
+    exit /b 1
+)
+echo [SUCCESS] All required packages installed.
 echo.
 
 REM Download the compatible ChromeDriver for Windows based on Chrome version
@@ -214,24 +202,17 @@ if not exist "%USERPROFILE%\.chromedriver\temp" mkdir "%USERPROFILE%\.chromedriv
 
 echo [ACTION] Extracting using Windows built-in tools...
 cd "%USERPROFILE%\.chromedriver"
-if exist "%USERPROFILE%\.chromedriver\temp\chromedriver-win64" rmdir /s /q "%USERPROFILE%\.chromedriver\temp\chromedriver-win64"
 
 REM Use tar instead of PowerShell for extraction (available in Windows 10+)
 tar -xf chromedriver.zip -C temp
 if %errorlevel% neq 0 (
     echo [WARNING] Extraction with tar failed, trying alternative method...
-    REM Try PowerShell if tar fails
-    powershell -command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('chromedriver.zip', 'temp')" 2>nul
+    call :ExtractZip "%USERPROFILE%\.chromedriver\chromedriver.zip" "%USERPROFILE%\.chromedriver\temp"
     if %errorlevel% neq 0 (
-        echo [ERROR] Failed to extract ChromeDriver.
-        echo [INFO] Trying one last method...
-        REM Try using the expand command as last resort
-        expand -r chromedriver.zip temp\
-        if %errorlevel% neq 0 (
-            echo [ERROR] All extraction methods failed. Please download manually.
-            pause
-            exit /b 1
-        )
+        echo [ERROR] All extraction methods failed. Please download manually.
+        cd "%~dp0"
+        pause
+        exit /b 1
     )
 )
 cd "%~dp0"
@@ -242,19 +223,18 @@ REM Find and move the executable
 echo [INFO] Installing ChromeDriver...
 echo [ACTION] Copying ChromeDriver executable to final location...
 
-REM Use recursive dir to find chromedriver.exe
-dir /s /b "%USERPROFILE%\.chromedriver\temp\*chromedriver.exe" > "%USERPROFILE%\.chromedriver\driver_path.txt"
-set /p driver_path=<"%USERPROFILE%\.chromedriver\driver_path.txt"
-
-if "%driver_path%"=="" (
-    echo [ERROR] Could not find chromedriver.exe in extracted files.
-    pause
-    exit /b 1
+REM Find chromedriver.exe in the extracted directory structure
+for /r "%USERPROFILE%\.chromedriver\temp" %%f in (chromedriver.exe) do (
+    echo [INFO] Found chromedriver.exe: %%f
+    copy "%%f" "%USERPROFILE%\.chromedriver\chromedriver.exe" /Y
+    if !errorlevel! equ 0 (
+        set "driver_found=yes"
+    )
 )
 
-copy "%driver_path%" "%USERPROFILE%\.chromedriver\chromedriver.exe" /Y
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to copy ChromeDriver to destination.
+REM Check if driver was found and copied
+if not defined driver_found (
+    echo [ERROR] Could not find chromedriver.exe in extracted files.
     pause
     exit /b 1
 )
@@ -272,7 +252,6 @@ REM Clean up temporary files
 echo [INFO] Cleaning up temporary files...
 rmdir /s /q "%USERPROFILE%\.chromedriver\temp"
 del "%USERPROFILE%\.chromedriver\chromedriver.zip"
-del "%USERPROFILE%\.chromedriver\driver_path.txt"
 echo [SUCCESS] Cleanup complete.
 echo.
 
@@ -297,3 +276,15 @@ echo =============================================
 echo.
 echo Press any key to exit setup...
 pause
+exit /b 0
+
+:ExtractZip
+REM Alternative extraction function using VBS script
+echo [INFO] Using VBScript for extraction...
+set vbs="%temp%\_.vbs"
+if exist %vbs% del /f /q %vbs%
+>%vbs% echo Set objShell = CreateObject("Shell.Application")
+>>%vbs% echo objShell.NameSpace("%~2").CopyHere objShell.NameSpace("%~1").Items
+cscript //nologo %vbs%
+del %vbs%
+exit /b 0
