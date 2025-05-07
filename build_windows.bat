@@ -164,7 +164,7 @@ if %errorlevel% neq 0 (
 
 echo [ACTION] Installing required packages (this may take several minutes)...
 echo (Package installation progress will be displayed below)
-python -m pip install -r requirements.txt
+python -m pip install -r requirements
 if %errorlevel% neq 0 (
     echo [ERROR] Failed to install required packages.
     echo Check the error messages above for details.
