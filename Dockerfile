@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DISPLAY=:99
 ENV DOCKER_CONTAINER=true
-ENV CHROME_VERSION=135.0.7049.95
+ENV CHROME_VERSION=136.0.6985.33
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y \
     libgbm1 libjpeg-dev libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome for Testing (v135)
+# Install Chrome for Testing (v136)
 RUN mkdir -p /opt/chrome \
     && wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip \
     && unzip chrome-linux64.zip \
@@ -29,7 +29,7 @@ RUN mkdir -p /opt/chrome \
     && ln -s /opt/chrome/chrome /usr/bin/google-chrome \
     && rm -rf chrome-linux64.zip chrome-linux64
 
-# Install matching ChromeDriver (v135)
+# Install matching ChromeDriver (v136)
 RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip \
     && unzip chromedriver-linux64.zip \
     && mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
