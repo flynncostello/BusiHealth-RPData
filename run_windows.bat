@@ -4,36 +4,22 @@ setlocal enabledelayedexpansion
 echo ==== Property Scraper - Starting Application ====
 echo.
 
-REM Check if build has been run
+REM Quick check for virtual environment
 if not exist "venv" (
-    echo Virtual environment not found! Running setup script first...
-    call build_windows.bat
-    
-    REM Check if build failed
-    if not exist "venv" (
-        echo Setup failed. Please fix the errors and try again.
-        pause
-        exit /b 1
-    )
+    echo Virtual environment not found! Please run build_windows.bat first.
+    pause
+    exit /b 1
 )
 
 REM Activate virtualenv
 echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
-REM Check Chrome installation
-reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" >nul 2>&1
-if %errorlevel% neq 0 (
-    echo Google Chrome is not installed! Running setup script...
-    call build_windows.bat
-    
-    REM Check again
-    reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe" >nul 2>&1
-    if %errorlevel% neq 0 (
-        echo Google Chrome installation failed. Please install Chrome manually.
-        pause
-        exit /b 1
-    )
+REM Quick check for ChromeDriver
+if not exist "%USERPROFILE%\.chromedriver\chromedriver.exe" (
+    echo ChromeDriver not found! Please run build_windows.bat first.
+    pause
+    exit /b 1
 )
 
 REM Get Chrome path from registry
@@ -41,13 +27,6 @@ for /f "tokens=*" %%a in ('reg query "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Wind
     set chrome_path=%%a
 )
 set chrome_path=%chrome_path:*REG_SZ    =%
-echo Chrome found at: %chrome_path%
-
-REM Check for ChromeDriver
-if not exist "%USERPROFILE%\.chromedriver\chromedriver.exe" (
-    echo ChromeDriver not found! Running setup script...
-    call build_windows.bat
-)
 
 REM Make sure directories exist
 if not exist "downloads" mkdir downloads
@@ -59,7 +38,6 @@ set CHROME_BINARY=%chrome_path%
 set CHROMEDRIVER_PATH=%USERPROFILE%\.chromedriver\chromedriver.exe
 
 REM Enable hardware acceleration and WebGL
-echo Enabling GPU acceleration for WebGL support...
 set CHROME_FLAGS=--ignore-gpu-blocklist --enable-gpu-rasterization --enable-webgl --enable-accelerated-2d-canvas
 
 echo.
