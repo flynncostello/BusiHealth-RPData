@@ -60,15 +60,17 @@ if not exist "%chrome_path%" (
 )
 echo.
 
-REM Get Chrome version to find matching ChromeDriver
+REM Get Chrome version from registry instead of launching Chrome
 echo [INFO] Getting Chrome version...
-echo [INFO] Running Chrome to get version info...
-for /f "tokens=3" %%v in ('"%chrome_path%" --version 2^>^&1') do (
-    set chrome_version=%%v
+for /f "tokens=*" %%V in ('reg query "HKLM\SOFTWARE\Google\Chrome\BLBeacon" /v version 2^>nul') do (
+    set chrome_version_line=%%V
+)
+for /f "tokens=3" %%V in ("!chrome_version_line!") do (
+    set chrome_version=%%V
 )
 
 if "%chrome_version%"=="" (
-    echo [WARNING] Could not determine Chrome version.
+    echo [WARNING] Could not determine Chrome version from registry.
     echo [INFO] Using default version 136.0.7103.49 for ChromeDriver.
     set chrome_version=136.0.7103.49
 )
@@ -149,86 +151,117 @@ if %errorlevel% neq 0 (
 echo [SUCCESS] Virtual environment activated.
 echo.
 
-echo [INFO] Upgrading pip and installing requirements...
-echo [ACTION] Upgrading pip...
-python -m pip install --upgrade pip
-if %errorlevel% neq 0 (
-    echo [WARNING] Failed to upgrade pip, but continuing...
+REM Check if requirements are already installed
+echo [INFO] Checking if required packages are already installed...
+set requirements_installed=0
+python -c "import flask, selenium, webdriver_manager" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [INFO] Core packages already installed, skipping pip install.
+    set requirements_installed=1
 )
 
-echo [ACTION] Upgrading setuptools and wheel...
-python -m pip install --upgrade setuptools wheel
-if %errorlevel% neq 0 (
-    echo [WARNING] Failed to upgrade setuptools/wheel, but continuing...
-)
+if %requirements_installed% equ 0 (
+    echo [INFO] Upgrading pip and installing requirements...
+    echo [ACTION] Upgrading pip...
+    python -m pip install --upgrade pip
+    if %errorlevel% neq 0 (
+        echo [WARNING] Failed to upgrade pip, but continuing...
+    )
 
-echo [INFO] ==================== REQUIREMENTS INSTALLATION DIAGNOSTICS ====================
-echo [DEBUG] Current directory: %CD%
-dir requirements.txt
-echo [DEBUG] ==========================================================================
-echo.
+    echo [ACTION] Upgrading setuptools and wheel...
+    python -m pip install --upgrade setuptools wheel
+    if %errorlevel% neq 0 (
+        echo [WARNING] Failed to upgrade setuptools/wheel, but continuing...
+    )
 
-echo [ACTION] Installing required packages (this may take several minutes)...
-echo (Package installation progress will be displayed below)
-python -m pip install -r requirements.txt
-if %errorlevel% neq 0 (
-    echo [ERROR] Failed to install required packages.
-    echo Check the error messages above for details.
-    pause
-    exit /b 1
+    echo [ACTION] Installing required packages (this may take several minutes)...
+    echo (Package installation progress will be displayed below)
+    python -m pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to install required packages.
+        echo Check the error messages above for details.
+        pause
+        exit /b 1
+    )
+    echo [SUCCESS] All required packages installed.
+) else (
+    echo [SUCCESS] Using existing packages.
 )
-echo [SUCCESS] All required packages installed.
 echo.
 
 REM Download the compatible ChromeDriver for Windows based on Chrome version
 echo [STEP 8/8] Downloading ChromeDriver...
 echo [INFO] Checking for compatible ChromeDriver for Chrome %chrome_major%...
 
-REM First try the exact chrome version
-set chromedriver_url=https://storage.googleapis.com/chrome-for-testing-public/%chrome_version%/win64/chromedriver-win64.zip
-echo [ACTION] Trying URL: %chromedriver_url%
+REM Use a verified stable version directly
+set chromedriver_url=https://storage.googleapis.com/chrome-for-testing-public/136.0.7103.49/win64/chromedriver-win64.zip
+echo [ACTION] Using stable ChromeDriver URL: %chromedriver_url%
 
 echo [INFO] Downloading ChromeDriver (this may take a moment)...
-curl -L -o "%USERPROFILE%\.chromedriver\chromedriver.zip" "%chromedriver_url%" --silent
+curl -L -o "%USERPROFILE%\.chromedriver\chromedriver.zip" "%chromedriver_url%"
 if %errorlevel% neq 0 (
-    echo [WARNING] First download attempt failed, trying stable version...
-    REM Fall back to the stable version if the exact match fails
-    set chromedriver_url=https://storage.googleapis.com/chrome-for-testing-public/136.0.7103.49/win64/chromedriver-win64.zip
-    echo [ACTION] Trying alternate URL: %chromedriver_url%
-    curl -L -o "%USERPROFILE%\.chromedriver\chromedriver.zip" "%chromedriver_url%"
-    
-    if %errorlevel% neq 0 (
-        echo [ERROR] ChromeDriver download failed. Please check your internet connection.
-        pause
-        exit /b 1
-    )
+    echo [ERROR] ChromeDriver download failed. Please check your internet connection.
+    pause
+    exit /b 1
 )
 echo [SUCCESS] ChromeDriver downloaded.
 echo.
 
-REM Extract the ChromeDriver
+REM Extract ChromeDriver using built-in Windows tools instead of PowerShell
 echo [INFO] Extracting ChromeDriver...
-echo [ACTION] Running PowerShell to extract the zip file...
-powershell -command "Expand-Archive -Path '%USERPROFILE%\.chromedriver\chromedriver.zip' -DestinationPath '%USERPROFILE%\.chromedriver\temp' -Force"
+echo [ACTION] Creating temporary extraction directory...
+if not exist "%USERPROFILE%\.chromedriver\temp" mkdir "%USERPROFILE%\.chromedriver\temp"
+
+echo [ACTION] Extracting using Windows built-in tools...
+cd "%USERPROFILE%\.chromedriver"
+if exist "%USERPROFILE%\.chromedriver\temp\chromedriver-win64" rmdir /s /q "%USERPROFILE%\.chromedriver\temp\chromedriver-win64"
+
+REM Use tar instead of PowerShell for extraction (available in Windows 10+)
+tar -xf chromedriver.zip -C temp
 if %errorlevel% neq 0 (
-    echo [ERROR] Failed to extract ChromeDriver.
-    echo Check if PowerShell is available on your system.
-    pause
-    exit /b 1
+    echo [WARNING] Extraction with tar failed, trying alternative method...
+    REM Try PowerShell if tar fails
+    powershell -command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('chromedriver.zip', 'temp')" 2>nul
+    if %errorlevel% neq 0 (
+        echo [ERROR] Failed to extract ChromeDriver.
+        echo [INFO] Trying one last method...
+        REM Try using the expand command as last resort
+        expand -r chromedriver.zip temp\
+        if %errorlevel% neq 0 (
+            echo [ERROR] All extraction methods failed. Please download manually.
+            pause
+            exit /b 1
+        )
+    )
 )
+cd "%~dp0"
 echo [SUCCESS] ChromeDriver extracted.
 echo.
 
 REM Find and move the executable
 echo [INFO] Installing ChromeDriver...
 echo [ACTION] Copying ChromeDriver executable to final location...
-for /r "%USERPROFILE%\.chromedriver\temp" %%f in (chromedriver.exe) do (
-    copy "%%f" "%USERPROFILE%\.chromedriver\chromedriver.exe" /Y
+
+REM Use recursive dir to find chromedriver.exe
+dir /s /b "%USERPROFILE%\.chromedriver\temp\*chromedriver.exe" > "%USERPROFILE%\.chromedriver\driver_path.txt"
+set /p driver_path=<"%USERPROFILE%\.chromedriver\driver_path.txt"
+
+if "%driver_path%"=="" (
+    echo [ERROR] Could not find chromedriver.exe in extracted files.
+    pause
+    exit /b 1
+)
+
+copy "%driver_path%" "%USERPROFILE%\.chromedriver\chromedriver.exe" /Y
+if %errorlevel% neq 0 (
+    echo [ERROR] Failed to copy ChromeDriver to destination.
+    pause
+    exit /b 1
 )
 
 REM Test if ChromeDriver exists
 if not exist "%USERPROFILE%\.chromedriver\chromedriver.exe" (
-    echo [ERROR] ChromeDriver extraction failed!
+    echo [ERROR] ChromeDriver installation failed!
     pause
     exit /b 1
 )
@@ -239,6 +272,7 @@ REM Clean up temporary files
 echo [INFO] Cleaning up temporary files...
 rmdir /s /q "%USERPROFILE%\.chromedriver\temp"
 del "%USERPROFILE%\.chromedriver\chromedriver.zip"
+del "%USERPROFILE%\.chromedriver\driver_path.txt"
 echo [SUCCESS] Cleanup complete.
 echo.
 
