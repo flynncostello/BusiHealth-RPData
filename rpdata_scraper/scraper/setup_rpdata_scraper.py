@@ -1,6 +1,61 @@
 #!/usr/bin/env python3
 """
 RP Data Scraper - CoreLogic Property Data Automation Tool
+========================================================
+
+OVERVIEW:
+---------
+This script automates the process of searching, filtering, and exporting property data
+from the RP Data (CoreLogic) platform. It handles the entire workflow from login to 
+data export, with robust error handling and logging at each step.
+
+FUNCTIONALITY:
+-------------
+- Automatically logs into the RP Data platform
+- Clears download directory to prevent file confusion
+- Performs property searches based on specified locations
+- Applies filters such as property types and floor area constraints
+- Handles selection of search results (all or first 10,000 if more)
+- Exports data to CSV/Excel format
+- Handles cases where searches return no results
+- Includes comprehensive logging for troubleshooting
+
+WORKFLOW STEPS:
+--------------
+1. Clear download directory
+2. Login to RP Data
+3. Select search type (Sales, For Sale, For Rent)
+4. Search for specified locations
+5. Apply property type and floor area filters
+6. Check if results exist; if none, skip to next search
+7. Select all results (or first 10,000)
+8. Export data to CSV
+9. Verify download and return file path
+10. Return to dashboard for next search
+
+REQUIREMENTS:
+------------
+- Selenium WebDriver with undetected_chromedriver
+- Valid RP Data credentials
+- Chrome browser installed
+- rpdata_base.py containing the base class with common utilities
+
+USAGE:
+------
+Create an instance of RPDataScraper and use the run_search method with appropriate parameters:
+
+    scraper = RPDataScraper(download_dir="/path/to/downloads", headless=False)
+    file_path = scraper.run_search(
+        username="your_username",
+        password="your_password",
+        search_type="Sales",  # or "For Sale" or "For Rent"
+        locations=["Sydney", "Melbourne"],
+        property_types=["House", "Unit"],
+        min_floor_area="100",
+        max_floor_area="500"
+    )
+
+Each method can also be called individually for more granular control over the process.
 """
 
 import os
@@ -40,7 +95,7 @@ class RPDataScraper(RPDataBase):
                 return None
             
             # Search for the specified locations
-            if not self.search_locations(locations, search_type):
+            if not self.search_locations(locations):
                 logger.error(f"Failed to search locations {locations}, skipping")
                 self.return_to_dashboard()
                 return None
@@ -134,14 +189,22 @@ class RPDataScraper(RPDataBase):
             return False
     
     def login(self, username, password):
-        """Log in to the RP Data website."""
+        """Log in to the RP Data website with page body content logging."""
         logger.info("===== LOGGING IN TO RP DATA =====")
         
         try:
             # Navigate to login page
             logger.info(f"Navigating to: {self.login_url}")
             self.driver.get(self.login_url)
-            self.random_delay(0.2, 0.3)
+            self.random_delay(0.3, 0.5)
+            
+            # Log the body content after navigation
+            try:
+                body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                body_text = body_element.text
+                logger.info(f"BODY CONTENT AFTER NAVIGATION: {body_text}")
+            except Exception as e:
+                logger.error(f"Error getting body content: {e}")
             
             # Find and fill username field
             username_field = self.wait_and_find_element(By.ID, "username")
@@ -181,9 +244,33 @@ class RPDataScraper(RPDataBase):
                 logger.error("Login button not found")
                 return False
             
+            # Log body content immediately after clicking login
+            try:
+                time.sleep(2)  # Wait briefly for any immediate page changes
+                body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                body_text = body_element.text
+                logger.info(f"BODY CONTENT AFTER LOGIN CLICK: {body_text}")
+            except Exception as e:
+                logger.error(f"Error getting body content after login click: {e}")
+            
             # Wait for login to complete and redirect to dashboard
             try:
                 logger.info("Waiting for dashboard...")
+                
+                # Log body content periodically during wait
+                for i in range(1, 6):  # Check 5 times, every 5 seconds
+                    try:
+                        time.sleep(5)
+                        body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                        body_text = body_element.text
+                        logger.info(f"BODY CONTENT DURING WAIT ({i*5}s): {body_text}")
+                        
+                        # Check if we've reached the dashboard
+                        if "Start your search here" in body_text:
+                            logger.info("Dashboard detected in body text")
+                            break
+                    except Exception as e:
+                        logger.error(f"Error getting body content during wait {i}: {e}")
                 
                 # Wait for redirection to dashboard
                 WebDriverWait(self.driver, 20).until(
@@ -192,16 +279,28 @@ class RPDataScraper(RPDataBase):
                 logger.info("Login successful - redirected to dashboard")
                 
                 # Brief wait after login
-                self.random_delay(0.3, 0.5)
+                self.random_delay(0.5, 1.0)
                 
                 return True
-            except:
+            except TimeoutException:
                 logger.error("Login appears to have failed - dashboard not loaded after timeout")
+                
+                # Log final body content at timeout
+                try:
+                    body_element = self.driver.find_element(By.TAG_NAME, 'body')
+                    body_text = body_element.text
+                    logger.info(f"FINAL BODY CONTENT AT TIMEOUT: {body_text}")
+                except Exception as e:
+                    logger.error(f"Error getting final body content: {e}")
+                    
                 return False
                     
         except Exception as e:
             logger.error(f"Login failed with exception: {e}")
             return False
+        
+
+
     
     def select_search_type(self, search_type):
         """Select the search type (Sales, For Sale, For Rent)."""
@@ -217,6 +316,8 @@ class RPDataScraper(RPDataBase):
             except:
                 logger.warning("Could not confirm dashboard page, but proceeding anyway")
             
+            # Try multiple approaches to find and select the search type
+            
             # Approach 1: Try to find radio buttons by name
             try:
                 radio_buttons = self.driver.find_elements(By.XPATH, "//input[@type='radio' and @name='row-radio-buttons-group']")
@@ -229,7 +330,7 @@ class RPDataScraper(RPDataBase):
                        (search_type == "For Rent" and value == "forRent"):
                         self.safe_click(radio)
                         logger.info(f"Selected search type by radio button: {search_type}")
-                        self.random_delay(0.2, 0.3)
+                        self.random_delay(0.3, 0.5)  # Faster delay
                         return True
             except Exception as e:
                 logger.warning(f"Error finding radio buttons by name: {e}")
@@ -254,7 +355,7 @@ class RPDataScraper(RPDataBase):
                         try:
                             self.safe_click(element)
                             logger.info(f"Clicked on element with text: {element.text}")
-                            self.random_delay(0.2, 0.3)
+                            self.random_delay(0.3, 0.5)  # Faster delay
                             return True
                         except Exception as e:
                             logger.warning(f"Failed to click element with text '{element.text}': {e}")
@@ -264,7 +365,7 @@ class RPDataScraper(RPDataBase):
                                 parent = element.find_element(By.XPATH, "./..")
                                 self.safe_click(parent)
                                 logger.info(f"Clicked on parent of element with text: {element.text}")
-                                self.random_delay(0.2, 0.3)
+                                self.random_delay(0.3, 0.5)  # Faster delay
                                 return True
                             except Exception as e2:
                                 logger.warning(f"Failed to click parent of element with text '{element.text}': {e2}")
@@ -280,7 +381,7 @@ class RPDataScraper(RPDataBase):
                     if label.is_displayed():
                         self.safe_click(label)
                         logger.info(f"Selected search type by label: {search_type}")
-                        self.random_delay(0.2, 0.3)
+                        self.random_delay(0.3, 0.5)  # Faster delay
                         return True
             except Exception as e:
                 logger.warning(f"Error finding search type by label: {e}")
@@ -304,7 +405,7 @@ class RPDataScraper(RPDataBase):
                             try:
                                 self.safe_click(element)
                                 logger.info(f"Selected search type using pattern {pattern}")
-                                self.random_delay(0.2, 0.3)
+                                self.random_delay(0.3, 0.5)  # Faster delay
                                 return True
                             except Exception as e:
                                 logger.warning(f"Failed to click element using pattern {pattern}: {e}")
@@ -322,11 +423,11 @@ class RPDataScraper(RPDataBase):
     def activate_search_suggestions(self, search_bar):
         try:
             # Try typing a single character to trigger suggestions
-            search_bar.send_keys('a')
-            self.random_delay(0.3, 0.5)
+            search_bar.send_keys('a')  # or use a very short, generic string
+            self.random_delay(0.5, 0.8)  # wait for suggestions to load
             
             # Alternatively, try simulating keyboard events
-            search_bar.send_keys(Keys.DOWN)
+            search_bar.send_keys(Keys.DOWN)  # might trigger dropdown
             
             logger.info("Attempted to activate search suggestions")
         except Exception as e:
@@ -372,7 +473,7 @@ class RPDataScraper(RPDataBase):
                 self.activate_search_suggestions(search_bar)
                 
                 # Wait for dropdown to appear
-                self.random_delay(0.3, 0.5)
+                self.random_delay(0.5, 0.8)
                 
                 # Try different selectors for the dropdown option
                 dropdown_selectors = [
@@ -399,7 +500,7 @@ class RPDataScraper(RPDataBase):
                 
                 self.safe_click(first_option)
                 logger.info("Selected first dropdown option")
-                self.random_delay(0.2, 0.3)
+                self.random_delay(0.3, 0.5)
             
             else:
                 # For the first location, we use the initial search field
@@ -440,7 +541,7 @@ class RPDataScraper(RPDataBase):
                 logger.info(f"Entered first location: {first_location}")
                 
                 # Wait for dropdown options to appear
-                self.random_delay(0.3, 0.5)
+                self.random_delay(0.5, 0.8)  # Faster wait for dropdown
                 
                 # Try different selectors for the dropdown option
                 dropdown_selectors = [
@@ -467,7 +568,7 @@ class RPDataScraper(RPDataBase):
                 
                 self.safe_click(first_option)
                 logger.info("Selected first location dropdown option")
-                self.random_delay(0.2, 0.3)
+                self.random_delay(0.3, 0.5)  # Faster delay
                 
                 # For additional locations, the UI is different
                 if len(locations) > 1:
@@ -506,7 +607,7 @@ class RPDataScraper(RPDataBase):
                         logger.info(f"Entered additional location: {location}")
                         
                         # Wait for dropdown to appear
-                        self.random_delay(0.3, 0.5)
+                        self.random_delay(0.5, 0.8)  # Faster wait for dropdown
                         
                         # Try to find and click the first option for this location
                         additional_option = None
@@ -526,7 +627,7 @@ class RPDataScraper(RPDataBase):
                         
                         self.safe_click(additional_option)
                         logger.info(f"Selected option for additional location: {location}")
-                        self.random_delay(0.2, 0.3)
+                        self.random_delay(0.3, 0.5)  # Faster delay
                 
             # Find and click the search button
             search_button_selectors = [
@@ -578,7 +679,7 @@ class RPDataScraper(RPDataBase):
             logger.info("Clicked search button")
             
             # Wait for results page to load
-            self.random_delay(0.5, 1.0)
+            self.random_delay(1.0, 1.5)  # Faster wait for results
             
             # Check if search results loaded
             try:
@@ -634,7 +735,7 @@ class RPDataScraper(RPDataBase):
             
             self.safe_click(filter_button)
             logger.info("Clicked filter button")
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.7, 1.0)  # Faster delay
             
             # Set floor area if provided
             if min_floor_area != "Min" or max_floor_area != "Max":
@@ -656,7 +757,7 @@ class RPDataScraper(RPDataBase):
                             
                             # Scroll to the floor area section
                             self.driver.execute_script("arguments[0].scrollIntoView(true);", floor_area_section)
-                            self.random_delay(0.2, 0.3)
+                            self.random_delay(0.3, 0.5)  # Faster delay
                             break
                     except:
                         continue
@@ -683,33 +784,33 @@ class RPDataScraper(RPDataBase):
                                     min_input = input_fields[0]
                                     # First click to activate
                                     min_input.click()
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.1, 0.2)  # Faster delay
                                     # Clear it
                                     min_input.clear()
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.1, 0.2)  # Faster delay
                                     # Type the value
                                     min_input.send_keys(min_floor_area)
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.1, 0.2)  # Faster delay
                                     # Press Enter to confirm
                                     min_input.send_keys(Keys.ENTER)
                                     logger.info(f"Set minimum floor area: {min_floor_area}")
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.2, 0.3)  # Faster delay
                                 
                                 if max_floor_area != "Max":
                                     max_input = input_fields[1]
                                     # First click to activate
                                     max_input.click()
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.1, 0.2)  # Faster delay
                                     # Clear it
                                     max_input.clear()
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.1, 0.2)  # Faster delay
                                     # Type the value
                                     max_input.send_keys(max_floor_area)
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.1, 0.2)  # Faster delay
                                     # Press Enter to confirm
                                     max_input.send_keys(Keys.ENTER)
                                     logger.info(f"Set maximum floor area: {max_floor_area}")
-                                    self.random_delay(0.1, 0.2)
+                                    self.random_delay(0.2, 0.3)  # Faster delay
                             else:
                                 logger.warning(f"Expected 2 input fields, found {len(input_fields)}")
                     except Exception as e:
@@ -734,7 +835,7 @@ class RPDataScraper(RPDataBase):
                         logger.info(f"Found Property Type section with selector: {selector}")
                         # Scroll to property type section
                         self.driver.execute_script("arguments[0].scrollIntoView(true);", property_section)
-                        self.random_delay(0.2, 0.3)
+                        self.random_delay(0.3, 0.5)  # Faster delay
                         break
                 except:
                     continue
@@ -784,12 +885,12 @@ class RPDataScraper(RPDataBase):
                                 # Need to uncheck this property type
                                 logger.info(f"Unchecking property type: {prop_text}")
                                 self.safe_click(checkbox)
-                                self.random_delay(0.1, 0.2)
+                                self.random_delay(0.2, 0.3)  # Faster delay
                             elif not is_selected and should_be_selected:
                                 # Need to check this property type
                                 logger.info(f"Checking property type: {prop_text}")
                                 self.safe_click(checkbox)
-                                self.random_delay(0.1, 0.2)
+                                self.random_delay(0.2, 0.3)  # Faster delay
                             else:
                                 logger.info(f"Property type {prop_text} already {'selected' if is_selected else 'unselected'} as needed")
                         except Exception as e:
@@ -799,9 +900,9 @@ class RPDataScraper(RPDataBase):
             else:
                 logger.warning("Property Type section not found")
             
-            # Finally, apply the filters by clicking the button
-            logger.info("Waiting 0.5 second before applying filters...")
-            time.sleep(0.5)
+            # Finally, apply the filters by clicking the button with a shorter delay
+            logger.info("Waiting 1 second before applying filters...")
+            time.sleep(1)  # Faster delay before applying filters
             
             apply_button_selectors = [
                 "//button[@data-testid='apply-filters']",
@@ -845,7 +946,7 @@ class RPDataScraper(RPDataBase):
                 # Always click the button to apply filters or return to search page
                 self.safe_click(apply_button)
                 logger.info("Clicked apply button")
-                self.random_delay(0.5, 0.8)
+                self.random_delay(1.0, 1.5)  # Wait after clicking
                 
                 # If we found no results, we need to explicitly navigate back to the dashboard
                 if no_results_found:
@@ -1001,7 +1102,7 @@ class RPDataScraper(RPDataBase):
                     checkbox_input.click()
                     logger.info("Clicked checkbox input directly")
                     checkbox_clicked = True
-                    time.sleep(0.5)  # Wait for dropdown to appear
+                    time.sleep(1.5)  # Wait for dropdown to appear
                 except Exception as e:
                     logger.warning(f"Direct checkbox input click failed: {e}")
             
@@ -1018,7 +1119,7 @@ class RPDataScraper(RPDataBase):
                     checkbox_input.click()
                     logger.info("Clicked checkbox input within span")
                     checkbox_clicked = True
-                    time.sleep(0.5)
+                    time.sleep(1.5)
                 except Exception as e:
                     logger.warning(f"Checkbox within span click failed: {e}")
             
@@ -1035,7 +1136,7 @@ class RPDataScraper(RPDataBase):
                     checkbox_input.click()
                     logger.info("Clicked checkbox input within container")
                     checkbox_clicked = True
-                    time.sleep(0.5)
+                    time.sleep(1.5)
                 except Exception as e:
                     logger.warning(f"Checkbox within container click failed: {e}")
             
@@ -1050,7 +1151,7 @@ class RPDataScraper(RPDataBase):
                     self.driver.execute_script("arguments[0].click();", checkbox_span)
                     logger.info("Clicked checkbox span with JavaScript")
                     checkbox_clicked = True
-                    time.sleep(0.5)
+                    time.sleep(1.5)
                 except Exception as e:
                     logger.error(f"All checkbox click strategies failed: {e}")
                     return False  # Only return False here if we couldn't click ANY checkbox
@@ -1073,7 +1174,7 @@ class RPDataScraper(RPDataBase):
                         # Click the middle option label
                         middle_label.click()
                         logger.info(f"Clicked middle option: {middle_text}")
-                        time.sleep(0.3)
+                        time.sleep(0.5)
                         return True
                     else:
                         # Try to directly find the inputs
@@ -1087,7 +1188,7 @@ class RPDataScraper(RPDataBase):
                             middle_radio = radio_inputs[1]
                             middle_radio.click()
                             logger.info("Clicked middle radio input")
-                            time.sleep(0.3)
+                            time.sleep(0.5)
                             return True
                         else:
                             # Last resort: try to find by id
@@ -1098,7 +1199,7 @@ class RPDataScraper(RPDataBase):
                             
                             all_option.click()
                             logger.info("Clicked 'all-option' by ID")
-                            time.sleep(0.3)
+                            time.sleep(0.5)
                             return True
                 except Exception as e:
                     logger.error(f"Failed to click dropdown option: {e}")
@@ -1130,6 +1231,10 @@ class RPDataScraper(RPDataBase):
                 logger.info("Export button not found - likely no results to export")
                 return False
                 
+            # Wait a shorter time before looking for the export button
+            logger.info("Waiting 0.5 seconds before clicking export button...")
+            time.sleep(0.5)
+            
             # Try to find the export button directly by data-testid
             try:
                 export_button = self.driver.find_element(
@@ -1139,7 +1244,7 @@ class RPDataScraper(RPDataBase):
                 logger.info("Found export button by data-testid")
                 
                 # Click using regular click method
-                export_button.click
+                export_button.click()
                 logger.info("Clicked export button")
             except Exception as e:
                 logger.warning(f"Could not find export button by data-testid: {e}")
@@ -1174,8 +1279,10 @@ class RPDataScraper(RPDataBase):
                         logger.error(f"Could not find export button: {e}")
                         return False
             
-            # Wait for dialog to appear
-            self.random_delay(0.5, 0.8)
+            # Wait for dialog to appear - shorter wait time
+            self.random_delay(1.0, 1.5)
+            
+            # Skip looking for "Analysis Export" as it wasn't found in the logs
             
             # Check all checkboxes in the export dialog
             try:
@@ -1186,24 +1293,25 @@ class RPDataScraper(RPDataBase):
                     if not checkbox.is_selected() and checkbox.is_displayed():
                         try:
                             self.safe_click(checkbox)
-                            self.random_delay(0.1, 0.2)
+                            self.random_delay(0.1, 0.2)  # Faster delay
                         except:
                             pass
             except:
                 pass
             
-            # Check the acknowledgement box
+            # Check the acknowledgement box - USING ONLY THE METHOD THAT WORKED IN LOGS
             logger.info("Attempting to find and click the acknowledgement checkbox...")
             
+            # Using the method that worked according to the logs
             try:
-                # Find by data-testid
+                # Find by data-testid only (this was the only method that worked according to logs)
                 ack_checkbox = self.driver.find_element(
                     By.XPATH,
                     "//input[@data-testid='export-disclaimer-checkbox']"
                 )
                 logger.info("Found acknowledgement checkbox by data-testid")
                 
-                # Click using JavaScript for reliability
+                # Click using JavaScript for reliability (this method worked)
                 self.driver.execute_script("arguments[0].click();", ack_checkbox)
                 logger.info("Clicked acknowledgement checkbox using JavaScript")
             except Exception as e:
@@ -1211,11 +1319,11 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Wait a shorter time before finding the final export button
-            time.sleep(0.3)
+            time.sleep(0.5)
             
-            # Click the final export button
+            # Click the final export button - using exact element from the HTML
             try:
-                # Try by exact data-testid first
+                # Try by exact data-testid first (this worked according to logs)
                 final_export = self.driver.find_element(
                     By.XPATH,
                     "//button[@data-testid='submit-button']"
@@ -1230,7 +1338,7 @@ class RPDataScraper(RPDataBase):
                 
                 # Try alternative approaches
                 try:
-                    # Try by exact class
+                    # Try by exact class (from the HTML you provided)
                     final_export = self.driver.find_element(
                         By.XPATH,
                         "//button[contains(@class, 'MuiButton-containedPrimary')]"
@@ -1259,7 +1367,7 @@ class RPDataScraper(RPDataBase):
                         return False
             
             # Wait for download to complete - slightly shorter wait time
-            self.random_delay(3.0, 4.0)  
+            self.random_delay(6.0, 8.0)  
             
             # Verify download
             prefix_map = {
@@ -1273,9 +1381,9 @@ class RPDataScraper(RPDataBase):
                 logger.error(f"Unknown search type for file prefix: {search_type}")
                 return False
             
-            logger.info(f"Looking for downloaded file with prefix: {prefix}")
-            logger.info(f"Download directory: {self.download_dir}")
-            logger.info(f"Files in the download directory: {os.listdir(self.download_dir)}")
+            print(f"Looking for downloaded file with prefix: {prefix}")
+            print(f"Download directory: {self.download_dir}")
+            print(f"Files in the download directory: {os.listdir(self.download_dir)}")
             
             # Check for downloaded file
             downloaded_files = [f for f in os.listdir(self.download_dir) if f.startswith(prefix)]
@@ -1331,7 +1439,7 @@ class RPDataScraper(RPDataBase):
                 logger.info("Clicked logo to return to dashboard")
                 
                 # Wait for dashboard to load - shorter wait time
-                self.random_delay(0.5, 1.0)
+                self.random_delay(1.0, 2.0)
                 
                 # Verify we're back at the dashboard
                 try:
@@ -1346,7 +1454,7 @@ class RPDataScraper(RPDataBase):
             # If that didn't work, try direct navigation
             logger.info("Trying direct navigation to dashboard")
             self.driver.get(self.login_url)
-            self.random_delay(1.0, 1.5)
+            self.random_delay(2.0, 3.0)  # Slightly shorter wait time
             
             # Check if we're on the dashboard
             try:
@@ -1363,7 +1471,7 @@ class RPDataScraper(RPDataBase):
                     base_url = self.login_url.split('://')[0] + '://' + self.login_url.split('://')[1].split('/')[0]
                     self.driver.get(base_url)
                     logger.info(f"Trying navigation to base URL: {base_url}")
-                    self.random_delay(1.0, 1.5)
+                    self.random_delay(2.0, 3.0)
                     
                     WebDriverWait(self.driver, 5).until(
                         lambda driver: "Start your search here" in driver.page_source

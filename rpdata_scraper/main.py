@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # Main script to run the RP Data scraper and merger
+# Updated to support job-specific directories for multi-user isolation
 
 import os
 import sys
@@ -122,7 +123,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         )
         
         # Check for cancellation after scraping
-        if progress_callback(65, "Scraping completed, preparing to merge files...") is False:
+        if progress_callback(40, "Scraping completed, preparing to merge files...") is False:
             logger.info("Job cancelled after scraping")
             if global_scraper:
                 try:
@@ -138,17 +139,17 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Downloaded files: {result_files}")
 
         # Add delay to ensure files are completely written
-        logger.info("Waiting 3 seconds for files to finalize...")
-        time.sleep(3)  # 3 second delay
+        logger.info("Waiting 2 seconds for files to finalize...")
+        time.sleep(2)  # 2 second delay
         
         # Check for cancellation again
-        if progress_callback(70, "Files downloaded, starting merge process...") is False:
+        if progress_callback(42, "Files downloaded, starting merge process...") is False:
             logger.info("Job cancelled before merging")
             return None
         
         # Step 2: Process and merge the Excel files
         logger.info("\n===== STEP 2: PROCESSING AND MERGING FILES =====\n")
-        if progress_callback(75, "Starting to process files into complete merged file...") is False:
+        if progress_callback(45, "Starting to process files into complete merged file...") is False:
             logger.info("Job cancelled before processing")
             return None
 
