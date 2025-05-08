@@ -72,7 +72,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
 
         for i, search_type in enumerate(search_types):
             # Check for cancellation at the beginning of each search type
-            if progress_callback(20+i*10, f"Getting results for {search_type} data...") is False:
+            if progress_callback(10+i*20, f"Getting results for {search_type} data...") is False:
                 logger.info(f"Job cancelled before {search_type} search")
                 scraper.close()
                 return result_files, None
@@ -85,7 +85,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 continue
             
             # Check for cancellation after selecting search type
-            if progress_callback(21+i*10, f"Searching locations for {search_type}...") is False:
+            if progress_callback(15+i*20, f"Searching locations for {search_type}...") is False:
                 logger.info(f"Job cancelled after selecting {search_type}")
                 scraper.close()
                 return result_files, None
@@ -96,7 +96,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 continue
             
             # Check for cancellation after searching locations
-            if progress_callback(24+i*10, f"Applying filters for {search_type}...") is False:
+            if progress_callback(25+i*20, f"Applying filters for {search_type}...") is False:
                 logger.info(f"Job cancelled after searching locations for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -107,7 +107,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 continue
             
             # Check for cancellation after applying filters
-            if progress_callback(27+i*10, f"Selecting results for {search_type}...") is False:
+            if progress_callback(30+i*20, f"Selecting results for {search_type}...") is False:
                 logger.info(f"Job cancelled after applying filters for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -118,7 +118,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 continue
             
             # Check for cancellation before export
-            if progress_callback(29+i*10, f"Exporting data for {search_type}...") is False:
+            if progress_callback(39+i*20, f"Exporting data for {search_type}...") is False:
                 logger.info(f"Job cancelled before export for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -154,7 +154,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                     logger.error(f"Failed to return to dashboard after: {search_type}, aborting")
                     break
         
-        progress_callback(43, "Downloaded all data from RPData...")
+        progress_callback(80, "Downloaded all data from RPData...")
 
         # Return both the result files and the scraper instance
         # The scraper instance is needed to properly close the browser if cancellation occurs
