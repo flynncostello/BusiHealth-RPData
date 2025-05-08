@@ -106,16 +106,6 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         if progress_callback(3, "Setting up scraper...") is False:
             logger.info("Job cancelled during setup")
             return None
-
-        # Create a modified progress callback that maintains minimum progress level
-        def progress_with_minimum(percentage, message):
-            # Ensure progress never goes below current level unless it's a cancellation check
-            nonlocal progress_callback
-            adjusted_percentage = max(percentage, 3)  # Never go below 3%
-            return progress_callback(adjusted_percentage, message)
-
-        # Pass the modified progress_callback to scrape_rpdata
-        from scraper.scrape_rpdata import scrape_rpdata
         
         # Modify the scrape_rpdata function to store the scraper instance globally
         # so it can be terminated if needed
@@ -125,7 +115,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             headless=headless,
-            progress_callback=progress_with_minimum,
+            progress_callback=progress_callback,
             download_dir=download_dir
         )
         

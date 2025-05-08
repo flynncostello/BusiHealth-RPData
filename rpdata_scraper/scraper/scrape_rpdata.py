@@ -45,13 +45,20 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
 
         search_types = ["For Rent", "For Sale", "Sales"]
         total_steps = len(search_types)
+        # New implementation:
         base_progress = 10
         max_progress = 90
         progress_range = max_progress - base_progress
         progress_per_type = progress_range / total_steps  # ≈26.67
+        current_progress_minimum = base_progress  # Track the minimum progress so far
 
         for i, search_type in enumerate(search_types):
-            step = lambda s: int(base_progress + i * progress_per_type + s * (progress_per_type / 6))
+            # Update minimum progress for this search type
+            current_progress_minimum = base_progress + i * progress_per_type
+            
+            # Create a step function that respects minimum progress
+            def step(s, i=i, current_min=current_progress_minimum):
+                return int(max(current_min, base_progress + i * progress_per_type + s * (progress_per_type / 6)))
 
             if progress_callback(step(0), f"Starting {search_type}...") is False:
                 logger.info(f"Job cancelled before {search_type} search")
