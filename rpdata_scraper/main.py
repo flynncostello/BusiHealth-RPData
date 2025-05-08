@@ -185,7 +185,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
                     newest_file = os.path.join(output_dir, files[0])
                     logger.info(f"Processing complete. Merged file saved to: {newest_file}")
                     
-                    progress_callback(100, f"Processing complete! File saved as {os.path.basename(newest_file)}")
+                    progress_callback(98, f"Processing complete! File saved as {os.path.basename(newest_file)}")
                     return output_dir
             
             logger.info(f"Processing complete. Merged file saved to output directory: {output_dir}")
