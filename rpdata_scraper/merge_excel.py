@@ -7,7 +7,7 @@ import pandas as pd
 import re
 import openpyxl
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter, column_index_from_string
 from datetime import datetime
 from collections import Counter
@@ -213,7 +213,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         # Set worksheet name to "Properties" as requested
         ws.title = "Properties"
         
-        # Create headers for the merged file
+        # Create headers for the merged file - MODIFIED "Last Listed Price" to "Last Listed Price (Sold/For Sale)"
         headers = [
             "Type", "Property Photo", "Street Address", "Suburb", "State", "Postcode",
             "Site Zoning", "Property Type", "Bed", "Bath", "Car", "Extra Cost for Parks", "Land Size (m²)",
@@ -224,7 +224,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
             "Sale Price", "Sale Date", "Settlement Date", "Sale Type", "Owner 1 Name",
             "Owner 2 Name", "Owner 3 Name", "Vendor 1 Name", "Vendor 2 Name", "Vendor 3 Name",
             # For "For Sale" only
-            "First Listed Price", "First Listed Date", "Last Listed Price", "Last Listed Date",
+            "First Listed Price", "First Listed Date", "Last Listed Price (Sold/For Sale)", "Last Listed Date",
             "Listing Type",
             # For "For Rent" only
             "First Rental Price", "First Rental Date", "Last Rental Price", "Last Rental Date",
@@ -243,6 +243,8 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         # Make the header row bold
         for cell in ws[1]:
             cell.font = Font(bold=True, size=14)
+            # Enable text wrapping for header cells
+            cell.alignment = Alignment(wrap_text=True, vertical='center')
 
         # First pass: collect all rows
         all_rows = []
@@ -388,7 +390,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                     if search_type == "For Sale":
                         new_row[35] = row.get("First Listed Price", "")
                         new_row[36] = row.get("First Listed Date", "")
-                        new_row[37] = row.get("Last Listed Price", "")
+                        new_row[37] = row.get("Last Listed Price", "")  # Index adjusted for new header name
                         new_row[38] = row.get("Last Listed Date", "")
                         new_row[39] = row.get("Listing Type", "")
                         
@@ -454,9 +456,13 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                     cell = ws.cell(row=i, column=j+1, value=value)
                     cell.hyperlink = value
                     cell.style = "Hyperlink"
+                    # Enable text wrapping for link cells
+                    cell.alignment = Alignment(wrap_text=True, vertical='center')
                 else:
                     # Regular value
-                    ws.cell(row=i, column=j+1, value=value)
+                    cell = ws.cell(row=i, column=j+1, value=value)
+                    # Enable text wrapping for all cells
+                    cell.alignment = Alignment(wrap_text=True, vertical='center')
         
         # Set font size for all cells
         for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
@@ -467,6 +473,8 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                 else:
                     # Data rows - size 12
                     cell.font = Font(size=12)
+                # Ensure all cells have wrap text enabled
+                cell.alignment = Alignment(wrap_text=True, vertical='center')
 
         # Create a yellow fill pattern
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
@@ -484,47 +492,49 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                 cell = ws.cell(row=row_idx, column=col_idx)
                 cell.fill = yellow_fill
 
-
-        # Adjust column widths
+        # Adjust column widths - DOUBLED ALL VALUES FOR WIDER COLUMNS
         col_widths = {
-            'A': 15,  # Type
-            'B': 15,  # Property Photo (empty now)
-            'C': 30,  # Street Address
-            'D': 20,  # Suburb
-            'E': 10,  # State
-            'F': 10,  # Postcode
-            'G': 35,  # Site Zoning
-            'H': 20,  # Property Type
-            'I': 8,   # Bed
-            'J': 8,   # Bath
-            'K': 8,   # Car
-            'L': 20,  # Extra Cost for Parks
-            'M': 15,  # Land Size
-            'N': 15,  # Floor Size
-            'O': 12,  # Year Built
-            'P': 20,  # Agency
-            'Q': 20,  # Agent
-            'R': 15,  # Contact Phone
-            'S': 25,  # Email
-            'T': 15,  # Contacted
-            'U': 20,  # Land Use
-            'V': 20,  # Development Zone
-            'W': 20,  # Parcel Details
-            'X': 15,  # Owner Type
-            'Y': 30,  # Website Link
-            'AZ': 10, # Allowable Use in Zone
+            'A': 30,  # Type (doubled from 15)
+            'B': 30,  # Property Photo (doubled from 15)
+            'C': 60,  # Street Address (doubled from 30)
+            'D': 40,  # Suburb (doubled from 20)
+            'E': 20,  # State (doubled from 10)
+            'F': 20,  # Postcode (doubled from 10)
+            'G': 70,  # Site Zoning (doubled from 35)
+            'H': 40,  # Property Type (doubled from 20)
+            'I': 16,  # Bed (doubled from 8)
+            'J': 16,  # Bath (doubled from 8)
+            'K': 16,  # Car (doubled from 8)
+            'L': 40,  # Extra Cost for Parks (doubled from 20)
+            'M': 30,  # Land Size (doubled from 15)
+            'N': 30,  # Floor Size (doubled from 15)
+            'O': 24,  # Year Built (doubled from 12)
+            'P': 40,  # Agency (doubled from 20)
+            'Q': 40,  # Agent (doubled from 20)
+            'R': 30,  # Contact Phone (doubled from 15)
+            'S': 50,  # Email (doubled from 25)
+            'T': 30,  # Contacted (doubled from 15)
+            'U': 40,  # Land Use (doubled from 20)
+            'V': 40,  # Development Zone (doubled from 20)
+            'W': 40,  # Parcel Details (doubled from 20)
+            'X': 30,  # Owner Type (doubled from 15)
+            'Y': 60,  # Website Link (doubled from 30)
+            'AZ': 20, # Allowable Use in Zone (doubled from 10)
         }
         
-        # Apply column widths
+        # Apply column widths - ENSURING THEY ARE PROPERLY APPLIED
         for col_letter, width in col_widths.items():
-            if col_letter in ws.column_dimensions:
-                ws.column_dimensions[col_letter].width = width
+            ws.column_dimensions[col_letter].width = width
         
-        # Set default width for other columns
-        for col in ws.columns:
-            col_letter = col[0].column_letter
+        # Set default width for other columns (doubled the default from 15 to 30)
+        for i in range(1, ws.max_column + 1):
+            col_letter = get_column_letter(i)
             if col_letter not in col_widths:
-                ws.column_dimensions[col_letter].width = 15
+                ws.column_dimensions[col_letter].width = 30
+        
+        # Set row heights to a minimum value to accommodate wrapped text
+        for i in range(1, ws.max_row + 1):
+            ws.row_dimensions[i].height = 30  # Set a minimum height
         
         # Save the merged file
         wb.save(output_file)
@@ -543,7 +553,7 @@ def test_merge_excel():
     print("Testing merge_excel module...")
     
     # Create a test job ID
-    test_job_id = f"test_{int(time.time())}"
+    test_job_id = "2df4fe6f-c8bf-47ef-85ed-a1dba07089d5"
     
     # Create job-specific directories
     job_download_dir = os.path.join("downloads", test_job_id)
@@ -554,9 +564,9 @@ def test_merge_excel():
     
     # Check if test files exist in the job download directory
     test_files = {
-        "Sales": os.path.join(job_download_dir, "recentSaleExport_test.xlsx"),
-        "For Sale": os.path.join(job_download_dir, "forSaleExport_test.xlsx"),
-        "For Rent": os.path.join(job_download_dir, "forRentExport_test.xlsx")
+        "Sales": os.path.join(job_download_dir, "recentSaleExport_20250508155259.xlsx"),
+        "For Sale": os.path.join(job_download_dir, "forSaleExport_20250508155238.xlsx"),
+        "For Rent": os.path.join(job_download_dir, "forRentExport_20250508155220.xlsx"),
     }
     
     # Check if at least one test file exists

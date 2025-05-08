@@ -1,63 +1,4 @@
 #!/usr/bin/env python3
-"""
-RP Data Scraper - CoreLogic Property Data Automation Tool
-========================================================
-
-OVERVIEW:
----------
-This script automates the process of searching, filtering, and exporting property data
-from the RP Data (CoreLogic) platform. It handles the entire workflow from login to 
-data export, with robust error handling and logging at each step.
-
-FUNCTIONALITY:
--------------
-- Automatically logs into the RP Data platform
-- Clears download directory to prevent file confusion
-- Performs property searches based on specified locations
-- Applies filters such as property types and floor area constraints
-- Handles selection of search results (all or first 10,000 if more)
-- Exports data to CSV/Excel format
-- Handles cases where searches return no results
-- Includes comprehensive logging for troubleshooting
-
-WORKFLOW STEPS:
---------------
-1. Clear download directory
-2. Login to RP Data
-3. Select search type (Sales, For Sale, For Rent)
-4. Search for specified locations
-5. Apply property type and floor area filters
-6. Check if results exist; if none, skip to next search
-7. Select all results (or first 10,000)
-8. Export data to CSV
-9. Verify download and return file path
-10. Return to dashboard for next search
-
-REQUIREMENTS:
-------------
-- Selenium WebDriver with undetected_chromedriver
-- Valid RP Data credentials
-- Chrome browser installed
-- rpdata_base.py containing the base class with common utilities
-
-USAGE:
-------
-Create an instance of RPDataScraper and use the run_search method with appropriate parameters:
-
-    scraper = RPDataScraper(download_dir="/path/to/downloads", headless=False)
-    file_path = scraper.run_search(
-        username="your_username",
-        password="your_password",
-        search_type="Sales",  # or "For Sale" or "For Rent"
-        locations=["Sydney", "Melbourne"],
-        property_types=["House", "Unit"],
-        min_floor_area="100",
-        max_floor_area="500"
-    )
-
-Each method can also be called individually for more granular control over the process.
-"""
-
 import os
 import time
 from selenium.webdriver.common.by import By
@@ -84,14 +25,13 @@ class RPDataScraper(RPDataBase):
         logger.info(f"===== STARTING COMPLETE SEARCH FLOW: {search_type} =====")
         
         try:
-            # Login if needed
-            if not self.is_logged_in():
-                if not self.login(username, password):
-                    logger.error("Login failed, cannot proceed with search")
-                    return None
+            # Login
+            if not self.login(username, password):
+                logger.error("Login failed, cannot proceed with search")
+                return None
             
             # Add a brief pause after login to ensure the dashboard is loaded
-            time.sleep(1.5)
+            time.sleep(1)
             
             # Select the search type (Sales, For Sale, For Rent)
             if not self.select_search_type(search_type):
@@ -109,7 +49,7 @@ class RPDataScraper(RPDataBase):
                 return None
             
             # Brief pause after search to ensure results are loaded
-            time.sleep(1.5)
+            time.sleep(1)
             
             # Apply filters - now using enum-like constants instead of strings
             filter_result = self.apply_filters(property_types, min_floor_area, max_floor_area)
@@ -146,7 +86,7 @@ class RPDataScraper(RPDataBase):
                 return None
             
             # Wait for the download to complete
-            time.sleep(5)
+            time.sleep(3)
             
             # Try to find the downloaded file
             prefix_map = {
@@ -188,37 +128,14 @@ class RPDataScraper(RPDataBase):
                 pass
             return None
     
-    def is_logged_in(self):
-        """Check if already logged in by looking for dashboard elements."""
-        try:
-            # Look for elements that indicate we're already on the dashboard
-            dashboard_indicators = [
-                "//div[contains(text(), 'Start your search here')]",
-                "//a[contains(@class, 'cl-logo')]"
-            ]
-            
-            for indicator in dashboard_indicators:
-                try:
-                    element = self.driver.find_element(By.XPATH, indicator)
-                    if element.is_displayed():
-                        logger.info("Already logged in to RP Data")
-                        return True
-                except:
-                    continue
-            
-            return False
-        except Exception as e:
-            logger.warning(f"Error checking login status: {e}")
-            return False
-    
-    def safe_navigate(self, url, max_retries=3, retry_delay=1.5):
+    def safe_navigate(self, url, max_retries=3, retry_delay=0.5):
         """Safely navigate to a URL with retries."""
         for attempt in range(max_retries):
             try:
                 logger.info(f"Navigating to: {url} (attempt {attempt+1}/{max_retries})")
                 self.driver.get(url)
                 # Brief wait for page to start loading
-                time.sleep(1)
+                time.sleep(0.5)
                 return True
             except Exception as e:
                 logger.warning(f"Navigation error (attempt {attempt+1}): {e}")
@@ -266,7 +183,7 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Small delay between fields
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.1, 0.2)
             
             # Find and fill password field
             password_field = self.wait_and_find_element(By.ID, "password", timeout=4)
@@ -280,7 +197,7 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Small delay before clicking login
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.1, 0.2)
             
             # Find and click login button
             login_button = self.wait_and_find_clickable(By.ID, "signOnButton", timeout=4)
@@ -297,7 +214,7 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Brief wait for login to process
-            time.sleep(2)
+            time.sleep(1)
             
             # Wait for login to complete and redirect to dashboard
             try:
@@ -328,7 +245,7 @@ class RPDataScraper(RPDataBase):
         try:
             # Wait to make sure we're on the dashboard
             try:
-                WebDriverWait(self.driver, 3).until(
+                WebDriverWait(self.driver, 1).until(
                     lambda driver: "Start your search here" in driver.page_source
                 )
                 logger.info("Dashboard confirmed, proceeding with search type selection")
@@ -336,10 +253,8 @@ class RPDataScraper(RPDataBase):
                 logger.warning("Could not confirm dashboard page, but proceeding anyway")
                 # Brief wait to see if page finishes loading
                 time.sleep(1)
-            
-            # Try multiple approaches to find and select the search type
-            
-            # Approach 1: Try to find radio buttons by name
+                        
+            # Try to find radio buttons by name
             try:
                 radio_buttons = self.driver.find_elements(By.XPATH, "//input[@type='radio' and @name='row-radio-buttons-group']")
                 logger.info(f"Found {len(radio_buttons)} radio buttons by name")
@@ -356,87 +271,6 @@ class RPDataScraper(RPDataBase):
                         return True
             except Exception as e:
                 logger.warning(f"Error finding radio buttons by name: {e}")
-            
-            # Approach 2: Try to find by text
-            try:
-                # Different specific XPath for different search types to be more targeted
-                if search_type == "Sales":
-                    type_elements = self.driver.find_elements(By.XPATH, "//span[text()='Sales' or text()='Recent Sales' or contains(text(), 'Sales')]")
-                elif search_type == "For Sale":
-                    type_elements = self.driver.find_elements(By.XPATH, "//span[text()='For Sale' or contains(text(), 'For Sale')]")
-                elif search_type == "For Rent":
-                    type_elements = self.driver.find_elements(By.XPATH, "//span[text()='For Rent' or contains(text(), 'For Rent')]")
-                else:
-                    type_elements = self.driver.find_elements(By.XPATH, f"//span[contains(text(), '{search_type}')]")
-                
-                logger.info(f"Found {len(type_elements)} elements with text matching {search_type}")
-                
-                for element in type_elements:
-                    if element.is_displayed():
-                        # Try to click the element
-                        try:
-                            self.safe_click(element)
-                            logger.info(f"Clicked on element with text: {element.text}")
-                            # Brief delay
-                            self.random_delay(0.3, 0.5)
-                            return True
-                        except Exception as e:
-                            logger.warning(f"Failed to click element with text '{element.text}': {e}")
-                            
-                            # Try to find parent element that might be clickable
-                            try:
-                                parent = element.find_element(By.XPATH, "./..")
-                                self.safe_click(parent)
-                                logger.info(f"Clicked on parent of element with text: {element.text}")
-                                # Brief delay
-                                self.random_delay(0.3, 0.5)
-                                return True
-                            except Exception as e2:
-                                logger.warning(f"Failed to click parent of element with text '{element.text}': {e2}")
-            except Exception as e:
-                logger.warning(f"Error finding search type by text: {e}")
-            
-            # Approach 3: Try to find by label and its associated input
-            try:
-                labels = self.driver.find_elements(By.XPATH, f"//label[contains(., '{search_type}')]")
-                logger.info(f"Found {len(labels)} labels containing text '{search_type}'")
-                
-                for label in labels:
-                    if label.is_displayed():
-                        self.safe_click(label)
-                        logger.info(f"Selected search type by label: {search_type}")
-                        # Brief delay
-                        self.random_delay(0.3, 0.5)
-                        return True
-            except Exception as e:
-                logger.warning(f"Error finding search type by label: {e}")
-            
-            # Approach 4: More general approach looking for ANY visible element
-            try:
-                xpath_patterns = [
-                    f"//span[contains(text(), '{search_type}')]/..",
-                    f"//div[contains(text(), '{search_type}')]",
-                    f"//button[contains(text(), '{search_type}')]",
-                    f"//*[contains(@role, 'button')][contains(text(), '{search_type}')]",
-                    f"//*[contains(@class, 'button')][contains(text(), '{search_type}')]"
-                ]
-                
-                for pattern in xpath_patterns:
-                    elements = self.driver.find_elements(By.XPATH, pattern)
-                    logger.info(f"Found {len(elements)} elements with pattern {pattern}")
-                    
-                    for element in elements:
-                        if element.is_displayed():
-                            try:
-                                self.safe_click(element)
-                                logger.info(f"Selected search type using pattern {pattern}")
-                                # Brief delay
-                                self.random_delay(0.3, 0.5)
-                                return True
-                            except Exception as e:
-                                logger.warning(f"Failed to click element using pattern {pattern}: {e}")
-            except Exception as e:
-                logger.warning(f"Error with general approach for finding search type: {e}")
             
             # If we get here, we couldn't find the search type
             logger.error(f"Could not find search type: {search_type}")
@@ -472,26 +306,10 @@ class RPDataScraper(RPDataBase):
             if search_type in ["For Sale", "Sales"]:
                 logger.info(f"Search type is {search_type}, using first dropdown option")
                 # Click on the search bar to activate it
-                search_bar_selectors = [
-                    "//input[contains(@placeholder, 'Search for an address')]",
-                    "//input[contains(@id, 'crux-multi-locality-search')]",
-                    "//div[contains(@class, 'search-bar-container')]//input",
-                    "//div[@id='crux-search-bar']//input",
-                    "//input[contains(@placeholder, 'Search')]",
-                    "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]"
-                ]
+                search_bar_selector = "//input[contains(@placeholder, 'Search for an address')]"
                 
-                search_bar = None
-                for selector in search_bar_selectors:
-                    try:
-                        # Moderate timeout
-                        search_bar = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                        if search_bar:
-                            logger.info(f"Found search bar with selector: {selector}")
-                            break
-                    except:
-                        continue
-                
+                search_bar = self.wait_and_find_clickable(By.XPATH, search_bar_selector, timeout=4)
+                        
                 if not search_bar:
                     logger.error("Search bar not found")
                     return False
@@ -510,24 +328,8 @@ class RPDataScraper(RPDataBase):
                 self.random_delay(0.5, 1.0)
                 
                 # Try different selectors for the dropdown option
-                dropdown_selectors = [
-                    "//li[contains(@role, 'option') and @data-option-index='0']",
-                    "//li[contains(@id, 'crux-multi-locality-search-option-0')]", 
-                    "//li[contains(@class, 'MuiAutocomplete-option') and @data-option-index='0']",
-                    "//li[contains(@class, 'MuiAutocomplete-option')]",
-                    "//li[contains(@role, 'option')]"
-                ]
-                
-                first_option = None
-                for selector in dropdown_selectors:
-                    try:
-                        # Moderate timeout
-                        first_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                        if first_option:
-                            logger.info(f"Found dropdown option with selector: {selector}")
-                            break
-                    except:
-                        continue
+                dropdown_selector = "//li[contains(@role, 'option') and @data-option-index='0']"
+                first_option = self.wait_and_find_clickable(By.XPATH, dropdown_selector, timeout=4)
                 
                 if not first_option:
                     logger.error("No dropdown options found")
@@ -549,25 +351,8 @@ class RPDataScraper(RPDataBase):
                 logger.info(f"Adding first location: {first_location}")
                 
                 # Try multiple search field selectors
-                search_field_selectors = [
-                    "//input[contains(@placeholder, 'Search for an address')]",
-                    "//input[contains(@id, 'crux-multi-locality-search')]",
-                    "//div[contains(@class, 'search-bar-container')]//input",
-                    "//div[@id='crux-search-bar']//input",
-                    "//input[contains(@placeholder, 'Search')]",
-                    "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]"
-                ]
-                
-                search_field = None
-                for selector in search_field_selectors:
-                    try:
-                        # Moderate timeout
-                        search_field = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                        if search_field:
-                            logger.info(f"Found search field with selector: {selector}")
-                            break
-                    except:
-                        continue
+                search_field_selector = "//input[contains(@placeholder, 'Search for an address')]"
+                search_field = self.wait_and_find_clickable(By.XPATH, search_field_selector, timeout=4)
                 
                 if not search_field:
                     logger.error("Search field for first location not found")
@@ -581,24 +366,8 @@ class RPDataScraper(RPDataBase):
                 self.random_delay(0.5, 1.0)
                 
                 # Try different selectors for the dropdown option
-                dropdown_selectors = [
-                    "//li[contains(@role, 'option') and @data-option-index='0']",
-                    "//li[contains(@id, 'crux-multi-locality-search-option-0')]", 
-                    "//li[contains(@class, 'MuiAutocomplete-option') and @data-option-index='0']",
-                    "//li[contains(@class, 'MuiAutocomplete-option')]",
-                    "//li[contains(@role, 'option')]"
-                ]
-                
-                first_option = None
-                for selector in dropdown_selectors:
-                    try:
-                        # Moderate timeout
-                        first_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                        if first_option:
-                            logger.info(f"Found dropdown option with selector: {selector}")
-                            break
-                    except:
-                        continue
+                dropdown_selector = "//li[contains(@role, 'option') and @data-option-index='0']"
+                first_option = self.wait_and_find_clickable(By.XPATH, dropdown_selector, timeout=4)
                 
                 if not first_option:
                     logger.error("No dropdown options found for first location")
@@ -617,25 +386,8 @@ class RPDataScraper(RPDataBase):
                         logger.info(f"Adding additional location: {location}")
                         
                         # Try to find the additional search field
-                        search_again_selectors = [
-                            "//input[contains(@placeholder, 'Search for a suburb')]",
-                            "//div[contains(@class, 'MuiAutocomplete-root')]//input",
-                            "//div[@data-testid='searchbar']//input",
-                            "//input[contains(@aria-label, 'Search')]",
-                            "//input[contains(@type, 'text') and contains(@class, 'MuiInputBase-input')]",
-                            "//input[contains(@placeholder, 'Search')]"
-                        ]
-                        
-                        additional_search = None
-                        for selector in search_again_selectors:
-                            try:
-                                # Moderate timeout
-                                additional_search = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                                if additional_search:
-                                    logger.info(f"Found additional search field with selector: {selector}")
-                                    break
-                            except:
-                                continue
+                        search_again_selector = "//input[contains(@placeholder, 'Search for a suburb')]"
+                        additional_search = self.wait_and_find_clickable(By.XPATH, search_again_selector, timeout=4)
                         
                         if not additional_search:
                             logger.error(f"Could not find search field for additional location: {location}")
@@ -650,16 +402,7 @@ class RPDataScraper(RPDataBase):
                         self.random_delay(0.5, 1.0)
                         
                         # Try to find and click the first option for this location
-                        additional_option = None
-                        for selector in dropdown_selectors:
-                            try:
-                                # Moderate timeout
-                                additional_option = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                                if additional_option:
-                                    logger.info(f"Found dropdown option for additional location with selector: {selector}")
-                                    break
-                            except:
-                                continue
+                        additional_option = self.wait_and_find_clickable(By.XPATH, dropdown_selector, timeout=4)
                         
                         if not additional_option:
                             logger.warning(f"Could not find dropdown option for: {location}")
@@ -669,49 +412,11 @@ class RPDataScraper(RPDataBase):
                         self.safe_click(additional_option)
                         logger.info(f"Selected option for additional location: {location}")
                         # Brief delay
-                        self.random_delay(0.3, 0.5)
+                        self.random_delay(0.2, 0.4)
                 
             # Find and click the search button
-            search_button_selectors = [
-                "//button[contains(@class, 'search-btn')]",
-                "//button[contains(@class, 'button-primary')]//img[contains(@alt, 'Search Button')]/..",
-                "//button[contains(@type, 'button') and contains(@class, 'search-btn')]",
-                "//button[contains(@class, 'MuiButton-contained')]",
-                "//button[contains(@class, 'MuiButtonBase-root')]"
-            ]
-            
-            search_button = None
-            for selector in search_button_selectors:
-                try:
-                    # Moderate timeout
-                    search_button = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                    if search_button:
-                        logger.info(f"Found search button with selector: {selector}")
-                        break
-                except:
-                    continue
-            
-            if not search_button:
-                # Try to find by parent container and then button
-                try:
-                    container = self.wait_and_find_element(
-                        By.XPATH, 
-                        "//div[contains(@class, 'search-bar-container')]", 
-                        timeout=4
-                    )
-                    if container:
-                        buttons = container.find_elements(By.TAG_NAME, "button")
-                        for button in buttons:
-                            try:
-                                img = button.find_element(By.TAG_NAME, "img")
-                                if img and "Search" in img.get_attribute("alt"):
-                                    search_button = button
-                                    logger.info("Found search button through container and image")
-                                    break
-                            except:
-                                continue
-                except:
-                    pass
+            search_button_selector = "//button[contains(@class, 'search-btn')]"
+            search_button = self.wait_and_find_clickable(By.XPATH, search_button_selector, timeout=4)
             
             if not search_button:
                 logger.error("Search button not found")
@@ -722,7 +427,7 @@ class RPDataScraper(RPDataBase):
             logger.info("Clicked search button")
             
             # Wait for results page to load
-            self.random_delay(2.0, 3.0)
+            self.random_delay(1.0, 2.0)
             
             # Check if search results loaded - reasonable timeout
             try:
@@ -757,26 +462,11 @@ class RPDataScraper(RPDataBase):
         
         try:
             # Brief wait for the results page to load
-            time.sleep(0.5)
+            time.sleep(0.4)
             
             # Click the filter button
-            filter_button_selectors = [
-                "//button[contains(@data-testid, 'filter-modal')]",
-                "//button[contains(text(), 'Filters')]",
-                "//button[contains(@class, 'crux-search-filters__container__row__actions__button--filters')]",
-                "//button[contains(@class, 'MuiButton-contained')][contains(text(), 'Filter')]"
-            ]
-            
-            filter_button = None
-            for selector in filter_button_selectors:
-                try:
-                    # Moderate timeout
-                    filter_button = self.wait_and_find_clickable(By.XPATH, selector, timeout=4)
-                    if filter_button:
-                        logger.info(f"Found filter button with selector: {selector}")
-                        break
-                except:
-                    continue
+            filter_button_selector = "//button[contains(@data-testid, 'filter-modal')]"
+            filter_button = self.wait_and_find_clickable(By.XPATH, filter_button_selector, timeout=4)
             
             if not filter_button:
                 logger.error("Filter button not found")
@@ -785,34 +475,22 @@ class RPDataScraper(RPDataBase):
             self.safe_click(filter_button)
             logger.info("Clicked filter button")
             # Brief delay for filter modal to open
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.1, 0.3)
             
             # Set floor area if provided - FASTER IMPLEMENTATION
             if min_floor_area != "Min" or max_floor_area != "Max":
                 logger.info("Setting floor area filters")
                 
                 # Try to find the Floor Area section using the new selectors from the image
-                floor_area_selectors = [
-                    "//h6[contains(text(), 'Floor Area')]",
-                    "//div[contains(text(), 'Floor Area')]",
-                    "//label[contains(text(), 'Floor Area')]"
-                ]
+                floor_area_selector = "//h6[contains(text(), 'Floor Area')]"
                 
-                floor_area_section = None
-                for selector in floor_area_selectors:
-                    try:
-                        # Moderate timeout
-                        floor_area_section = self.wait_and_find_element(By.XPATH, selector, timeout=3)
-                        if floor_area_section:
-                            logger.info(f"Found Floor Area section with selector: {selector}")
-                            
-                            # Scroll to the floor area section
-                            self.driver.execute_script("arguments[0].scrollIntoView(true);", floor_area_section)
-                            # Minimal delay
-                            time.sleep(0.1)
-                            break
-                    except:
-                        continue
+                floor_area_section = self.wait_and_find_element(By.XPATH, floor_area_selector, timeout=3)
+                if floor_area_section:                    
+                    # Scroll to the floor area section
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", floor_area_section)
+                    # Minimal delay
+                    time.sleep(0.05)
+
                 
                 if floor_area_section:
                     # MUCH FASTER APPROACH: Get the input fields directly after finding the section
@@ -837,26 +515,26 @@ class RPDataScraper(RPDataBase):
                                     # First click to activate
                                     min_input.click()
                                     # Minimal delay
-                                    time.sleep(0.1)
+                                    time.sleep(0.05)
                                     # Clear it and type the value in one go
                                     min_input.clear()
                                     min_input.send_keys(min_floor_area + Keys.ENTER)
                                     logger.info(f"Set minimum floor area: {min_floor_area}")
                                     # Minimal delay
-                                    time.sleep(0.1)
+                                    time.sleep(0.05)
                                 
                                 if max_floor_area != "Max":
                                     max_input = input_fields[1]
                                     # First click to activate
                                     max_input.click()
                                     # Minimal delay
-                                    time.sleep(0.1)
+                                    time.sleep(0.05)
                                     # Clear it and type the value in one go
                                     max_input.clear()
                                     max_input.send_keys(max_floor_area + Keys.ENTER)
                                     logger.info(f"Set maximum floor area: {max_floor_area}")
                                     # Minimal delay
-                                    time.sleep(0.1)
+                                    time.sleep(0.05)
                             else:
                                 logger.warning(f"Expected 2 input fields, found {len(input_fields)}")
                     except Exception as e:
@@ -865,27 +543,16 @@ class RPDataScraper(RPDataBase):
                     logger.warning("Floor Area section not found")
             
             # FASTER PROPERTY TYPE SELECTION: Use faster methods for checkboxes
-            property_section_selectors = [
-                "//h6[contains(@class, 'MuiTypography-subtitle2')]/span[text()='Property Type']/..",
-                "//div[contains(@class, 'list-box--property-type')]//h6",
-                "//div[contains(@class, 'list-box--property-type')]",
-                "//h6[contains(text(), 'Property Type')]/.."
-            ]
+            property_section_selector = "//h6[contains(@class, 'MuiTypography-subtitle2')]/span[text()='Property Type']/.."
             
-            property_section = None
-            for selector in property_section_selectors:
-                try:
-                    # Moderate timeout
-                    property_section = self.wait_and_find_element(By.XPATH, selector, timeout=3)
-                    if property_section:
-                        logger.info(f"Found Property Type section with selector: {selector}")
-                        # Scroll to property type section
-                        self.driver.execute_script("arguments[0].scrollIntoView(true);", property_section)
-                        # Minimal delay
-                        time.sleep(0.1)
-                        break
-                except:
-                    continue
+            property_section = self.wait_and_find_element(By.XPATH, property_section_selector, timeout=3)
+            if property_section:
+                logger.info(f"Found Property Type section with selector: {selector}")
+                # Scroll to property type section
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", property_section)
+                # Minimal delay
+                time.sleep(0.05)
+
             
             if property_section:
                 # FASTER APPROACH: Find all checkboxes in one go and process them
