@@ -13,6 +13,26 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             pass
             return True
     
+    # Add global progress protection to ensure values never decrease
+    highest_percentage_seen = 0
+    original_callback = progress_callback
+    
+    def protected_progress_callback(percentage, message):
+        nonlocal highest_percentage_seen
+        
+        # Ensure progress never goes backwards
+        if percentage > highest_percentage_seen:
+            highest_percentage_seen = percentage
+        else:
+            # If a lower percentage is reported, use the highest we've seen
+            percentage = highest_percentage_seen
+            
+        # Call the original callback with the adjusted percentage
+        return original_callback(percentage, message)
+    
+    # Replace the callback with our protected version
+    progress_callback = protected_progress_callback
+    
     if download_dir is None:
         download_dir = os.path.join(os.getcwd(), "downloads")
     
@@ -45,22 +65,24 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
 
         search_types = ["For Rent", "For Sale", "Sales"]
         total_steps = len(search_types)
-        # New implementation:
+        
+        # Calculate progress ranges
         base_progress = 10
         max_progress = 90
         progress_range = max_progress - base_progress
-        progress_per_type = progress_range / total_steps  # ≈26.67
-        current_progress_minimum = base_progress  # Track the minimum progress so far
+        progress_per_type = progress_range / total_steps
 
         for i, search_type in enumerate(search_types):
-            # Update minimum progress for this search type
+            # Calculate minimum progress for this search type
             current_progress_minimum = base_progress + i * progress_per_type
             
-            # Create a step function that respects minimum progress
-            def step(s, i=i, current_min=current_progress_minimum):
-                return int(max(current_min, base_progress + i * progress_per_type + s * (progress_per_type / 6)))
+            # Create a step function for this search type that ensures progress
+            # is always at least the minimum for this type
+            def calculate_step(s, search_index=i, min_progress=current_progress_minimum):
+                calculated_progress = base_progress + search_index * progress_per_type + s * (progress_per_type / 6)
+                return int(max(min_progress, calculated_progress))
 
-            if progress_callback(step(0), f"Starting {search_type}...") is False:
+            if progress_callback(calculate_step(0), f"Starting {search_type}...") is False:
                 logger.info(f"Job cancelled before {search_type} search")
                 scraper.close()
                 return result_files, None
@@ -71,7 +93,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 logger.error(f"Failed to select search type: {search_type}, skipping")
                 continue
 
-            if progress_callback(step(1), f"Searching locations for {search_type}...") is False:
+            if progress_callback(calculate_step(1), f"Searching locations for {search_type}...") is False:
                 logger.info(f"Job cancelled during {search_type} location search")
                 scraper.close()
                 return result_files, None
@@ -80,7 +102,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 logger.error(f"Failed to search locations for: {search_type}, skipping")
                 continue
 
-            if progress_callback(step(2), f"Applying filters for {search_type}...") is False:
+            if progress_callback(calculate_step(2), f"Applying filters for {search_type}...") is False:
                 logger.info(f"Job cancelled during {search_type} filters")
                 scraper.close()
                 return result_files, None
@@ -89,7 +111,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 logger.error(f"Failed to apply filters for: {search_type}, skipping")
                 continue
 
-            if progress_callback(step(3), f"Selecting results for {search_type}...") is False:
+            if progress_callback(calculate_step(3), f"Selecting results for {search_type}...") is False:
                 logger.info(f"Job cancelled after filter for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -98,7 +120,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 logger.error(f"Failed to select all results for: {search_type}, skipping")
                 continue
 
-            if progress_callback(step(4), f"Exporting data for {search_type}...") is False:
+            if progress_callback(calculate_step(4), f"Exporting data for {search_type}...") is False:
                 logger.info(f"Job cancelled before export for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -119,7 +141,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 result_files[search_type] = os.path.join(scraper.download_dir, downloaded_files[0])
                 logger.info(f"Added file for {search_type}: {downloaded_files[0]}")
 
-            if progress_callback(step(5), f"Finished {search_type} export.") is False:
+            if progress_callback(calculate_step(5), f"Finished {search_type} export.") is False:
                 logger.info(f"Job cancelled after export for {search_type}")
                 scraper.close()
                 return result_files, None

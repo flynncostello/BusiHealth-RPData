@@ -274,13 +274,41 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Check if completed
+            // Handle completed jobs with additional verification
             if (data.status === 'completed' && data.result_file) {
-                clearInterval(statusInterval);
-                statusInterval = null;
+                // Set the download link
                 downloadBtn.href = `/api/download/${currentJobId}`;
-                downloadContainer.classList.remove('d-none');
-                isProcessing = false; // No longer processing once complete
+                
+                // If we're at 100% but haven't shown the download button yet,
+                // verify that the file is truly ready for download
+                if (downloadContainer.classList.contains('d-none')) {
+                    statusMessage.textContent = 'Verifying file is ready for download...';
+                    
+                    // Make a test request to verify file availability
+                    fetch(`/api/status/${currentJobId}`)
+                        .then(fileCheckResponse => fileCheckResponse.json())
+                        .then(fileStatus => {
+                            // Only show download button if we've reached 100% and status is completed
+                            if (fileStatus.status === 'completed' && fileStatus.result_file) {
+                                // We've double-checked that the status is still completed
+                                clearInterval(statusInterval);
+                                statusInterval = null;
+                                
+                                // Show download container
+                                downloadContainer.classList.remove('d-none');
+                                statusMessage.textContent = 'Processing complete! File is ready for download.';
+                                isProcessing = false;
+                            } else {
+                                // Status says completed but double-check shows it might not be ready
+                                statusMessage.textContent = 'File is still being prepared, please wait...';
+                                // Continue polling
+                            }
+                        })
+                        .catch(error => {
+                            console.log('Error verifying file readiness:', error);
+                            // Continue polling
+                        });
+                }
             }
             
             // Check if error

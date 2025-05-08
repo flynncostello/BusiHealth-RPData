@@ -152,7 +152,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             business_type, headless, download_dir, output_dir):
     """Run the main processing job in a background thread with job-specific directories"""
     try:
-        update_job_status(job_id, 'running', 5, 'Initializing search...')
+        update_job_status(job_id, 'running', 2, 'Initializing search...')
         
         # Check if job is cancelled before starting
         if check_if_cancelled(job_id):
@@ -161,7 +161,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             return
         
         # Track the highest percentage seen so far
-        highest_percentage = 5  # Start with the initial value
+        highest_percentage = 2  # Start with the initial value
         
         # Create progress callback function with progress protection
         def progress_callback(percentage, message):
@@ -248,6 +248,9 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
                             time.sleep(2)  # Wait 2 seconds before trying again
 
                     # Now update job status with local file path
+                    time.sleep(5)  # Additional delay before marking as completed
+                    logger.info(f"Marking job {job_id} as completed with file: {result_file}")
+                    # Update job status to completed
                     update_job_status(job_id, 'completed', 100, 'Processing complete!', result_file)
                     
                     # Double-check the status was properly saved to disk
@@ -413,22 +416,30 @@ def cleanup_job_files(job_id):
 
 @app.route('/api/status/<job_id>')
 def job_status(job_id):
-    """Get the status of a job"""
+    """Get the status of a job with improved download readiness checks"""
     try:
         # Check memory cache first
+        status = None
         if job_id in jobs:
-            return jsonify(jobs[job_id])
+            status = jobs[job_id].copy()  # Make a copy to avoid modifying the original
+        else:
+            # Try to load from disk if not in memory
+            try:
+                with open(f'tmp/{job_id}.json', 'r') as f:
+                    status = json.load(f)
+                    # Cache in memory
+                    jobs[job_id] = status
+            except Exception as e:
+                logger.error(f"Error loading job status for {job_id}: {str(e)}")
+                return jsonify({'error': 'Job not found'}), 404
         
-        # Try to load from disk if not in memory
-        try:
-            with open(f'tmp/{job_id}.json', 'r') as f:
-                status = json.load(f)
-                # Cache in memory
-                jobs[job_id] = status
-                return jsonify(status)
-        except Exception as e:
-            logger.error(f"Error loading job status for {job_id}: {str(e)}")
-            return jsonify({'error': 'Job not found'}), 404
+        # Add a download_ready flag to clearly indicate when download is truly available
+        if status.get('status') == 'completed' and status.get('result_file') and os.path.exists(status.get('result_file')):
+            status['download_ready'] = True
+        else:
+            status['download_ready'] = False
+            
+        return jsonify(status)
     except Exception as e:
         logger.error(f"Error in job_status endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
@@ -440,7 +451,7 @@ def download_file(job_id):
         logger.info(f"Download requested for job {job_id}")
         
         # Add initial delay to ensure background processes have time to update status
-        time.sleep(2)
+        time.sleep(3)
         
         # Get job status
         status = None
