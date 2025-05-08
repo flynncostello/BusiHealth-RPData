@@ -7,7 +7,8 @@ import pandas as pd
 import re
 import openpyxl
 from openpyxl import Workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter, column_index_from_string
 from datetime import datetime
 from collections import Counter
 import time
@@ -466,7 +467,24 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                 else:
                     # Data rows - size 12
                     cell.font = Font(size=12)
-        
+
+        # Create a yellow fill pattern
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+
+        # List of columns to highlight
+        columns_to_highlight = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'K', 'N', 
+                                'AL', 'AT', 'AZ', 'BA', 'BD', 'BF']
+
+        # Convert column letters to column indices for easier processing
+        column_indices = [column_index_from_string(col) for col in columns_to_highlight]
+
+        # Apply yellow fill to only the specified columns for all rows
+        for row_idx in range(1, ws.max_row + 1):
+            for col_idx in column_indices:
+                cell = ws.cell(row=row_idx, column=col_idx)
+                cell.fill = yellow_fill
+
+
         # Adjust column widths
         col_widths = {
             'A': 15,  # Type

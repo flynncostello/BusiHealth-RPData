@@ -1,7 +1,8 @@
-# Use official Python base image with AMD64 architecture
-FROM python:3.9-slim-bullseye
+# For Azure: This is the standard base image that works natively
+# For Mac M2: Adding platform specification for compatibility
+FROM --platform=linux/amd64 python:3.9-slim-bullseye
 
-# Set environment variables
+# Set environment variables 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV DEBIAN_FRONTEND=noninteractive
@@ -20,7 +21,7 @@ RUN apt-get update && apt-get install -y \
     libgbm1 libjpeg-dev libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome for Testing (v136) - Using verified URL from the availability page
+# Install Chrome for Testing (v136)
 RUN mkdir -p /opt/chrome \
     && wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip \
     && unzip chrome-linux64.zip \
@@ -29,7 +30,7 @@ RUN mkdir -p /opt/chrome \
     && ln -s /opt/chrome/chrome /usr/bin/google-chrome \
     && rm -rf chrome-linux64.zip chrome-linux64
 
-# Install matching ChromeDriver (v136) - Using verified URL from the availability page
+# Install matching ChromeDriver (v136)
 RUN wget -q https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip \
     && unzip chromedriver-linux64.zip \
     && mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
@@ -54,5 +55,5 @@ COPY . .
 # Expose the Flask app port
 EXPOSE 8000
 
-# Run using Gunicorn directly (no entrypoint.sh)
+# Run using Gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app"]
