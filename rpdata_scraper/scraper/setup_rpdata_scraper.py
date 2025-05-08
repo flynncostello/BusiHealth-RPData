@@ -188,6 +188,27 @@ class RPDataScraper(RPDataBase):
             logger.warning(f"Error checking login status: {e}")
             return False
     
+    def safe_navigate(self, url, max_retries=3, retry_delay=1):
+        """Safely navigate to a URL with retries."""
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Navigating to: {url} (attempt {attempt+1}/{max_retries})")
+                self.driver.get(url)
+                return True
+            except Exception as e:
+                logger.warning(f"Navigation error (attempt {attempt+1}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    # Check if driver is still responsive
+                    try:
+                        self.driver.current_url  # Try to access a property to check if driver is alive
+                    except:
+                        logger.error("WebDriver is no longer responsive, cannot retry navigation")
+                        return False
+                else:
+                    logger.error(f"Failed to navigate to {url} after {max_retries} attempts")
+                    return False
+            
     def login(self, username, password):
         """Log in to the RP Data website with page body content logging."""
         logger.info("===== LOGGING IN TO RP DATA =====")
@@ -195,7 +216,10 @@ class RPDataScraper(RPDataBase):
         try:
             # Navigate to login page
             logger.info(f"Navigating to: {self.login_url}")
-            self.driver.get(self.login_url)
+            # Navigate to login page with retries
+            if not self.safe_navigate(self.login_url):
+                logger.error("Failed to navigate to login page, cannot login")
+                return False
             # Reduced delay
             self.random_delay(0.1, 0.2)
             
