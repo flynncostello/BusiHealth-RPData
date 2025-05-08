@@ -191,7 +191,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     logger.info("===== PROCESSING EXCEL FILES =====")
 
     # Check for cancellation at the start
-    if check_cancellation(progress_callback, 78, "Starting to process Excel files..."):
+    if check_cancellation(progress_callback, 96, "Starting to process Excel files..."):
         logger.info("Job cancelled at the start of Excel processing")
         return False
     
@@ -201,7 +201,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
     
     try:
         # Check for cancellation before collecting data
-        if check_cancellation(progress_callback, 80, "Parsing Excel files..."):
+        if check_cancellation(progress_callback, 96, "Parsing Excel files..."):
             logger.info("Job cancelled before Excel parsing")
             return False
         
@@ -248,7 +248,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         
         logger.info("First pass: collecting all property data...")
         
-        progress_callback(85, "Extracting data from forSale, forRent and Sales...")
+        progress_callback(97, "Extracting data from forSale, forRent and Sales...")
 
         row_index = 0
         for search_type, file_path in files_dict.items():
@@ -423,11 +423,11 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
                 import traceback
                 logger.error(traceback.format_exc())
 
-        if check_cancellation(progress_callback, 90, "Processing property data..."):
+        if check_cancellation(progress_callback, 97, "Processing property data..."):
             logger.info("Job cancelled while processing property data")
             return False
         
-        progress_callback(95, "Writing all properties to final merged file...")
+        progress_callback(98, "Writing all properties to final merged file...")
 
         # Write all rows to the worksheet
         logger.info("Writing all rows to the output file...")
@@ -435,7 +435,7 @@ def process_excel_files(files_dict, locations, property_types, min_floor, max_fl
         # Current date for "Date Added" column
         today_str = datetime.now().strftime("%d/%m/%Y")
 
-        if check_cancellation(progress_callback, 97, "Writing to Excel file..."):
+        if check_cancellation(progress_callback, 98, "Writing to Excel file..."):
             logger.info("Job cancelled before writing Excel file")
             return False
         

@@ -103,7 +103,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Output Directory: {output_dir}")
         
         # Check for cancellation before starting scraper
-        if progress_callback(10, "Setting up scraper...") is False:
+        if progress_callback(3, "Setting up scraper...") is False:
             logger.info("Job cancelled during setup")
             return None
         
@@ -123,7 +123,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         )
         
         # Check for cancellation after scraping
-        if progress_callback(80, "Scraping completed, preparing to merge files...") is False:
+        if progress_callback(92, "Scraping completed, preparing to merge files...") is False:
             logger.info("Job cancelled after scraping")
             if global_scraper:
                 try:
@@ -143,13 +143,13 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         time.sleep(3)  # 3 second delay
         
         # Check for cancellation again
-        if progress_callback(85, "Files downloaded, starting merge process...") is False:
+        if progress_callback(94, "Files downloaded, starting merge process...") is False:
             logger.info("Job cancelled before merging")
             return None
         
         # Step 2: Process and merge the Excel files
         logger.info("\n===== STEP 2: PROCESSING AND MERGING FILES =====\n")
-        if progress_callback(87, "Starting to process files into complete merged file...") is False:
+        if progress_callback(95, "Starting to process files into complete merged file...") is False:
             logger.info("Job cancelled before processing")
             return None
 
@@ -171,7 +171,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Total processing time: {elapsed_time:.2f} seconds")
         
         # Final cancellation check
-        if progress_callback(98, "Processing complete, preparing final file...") is False:
+        if progress_callback(99, "Processing complete, preparing final file...") is False:
             logger.info("Job cancelled at final stage")
             return None
         
