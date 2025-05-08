@@ -213,7 +213,25 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
                     result_file = os.path.abspath(result_file)
                     logger.info(f"Absolute file path: {result_file}")
                     
-                    # Update job status with local file path
+                    # Add a delay to ensure file is fully written and accessible
+                    import time
+                    logger.info(f"Ensuring file is ready before marking job as complete...")
+                    for attempt in range(5):  # Try up to 5 times
+                        if os.path.exists(result_file) and os.access(result_file, os.R_OK):
+                            try:
+                                # Test if file can be opened
+                                with open(result_file, 'rb') as test_file:
+                                    test_file.read(1024)  # Try to read some data
+                                logger.info(f"File is confirmed ready after {attempt} attempts")
+                                break
+                            except Exception as e:
+                                logger.warning(f"File not yet ready (attempt {attempt+1}): {e}")
+                                time.sleep(2)  # Wait 2 seconds before trying again
+                        else:
+                            logger.warning(f"File not yet accessible (attempt {attempt+1})")
+                            time.sleep(2)  # Wait 2 seconds before trying again
+
+                    # Now update job status with local file path
                     update_job_status(job_id, 'completed', 100, 'Processing complete!', result_file)
                 else:
                     logger.error(f"No files found in {output_dir} for job {job_id}")
@@ -294,7 +312,7 @@ def update_job_status(job_id, status, progress, message, result_file=None):
 def cleanup_job_files(job_id):
     """Clean up job-specific directories after successful download"""
     import time
-    time.sleep(10)  # Give browser time to complete download
+    time.sleep(20)  # Give browser time to complete download
     logger.info(f"Cleaning up job files for {job_id}")
 
     try:
@@ -439,6 +457,27 @@ def download_file(job_id):
         
         # Try to send the file
         try:
+            logger.info(f"Verifying file is ready before sending: {file_path}")
+            file_ready = False
+            for attempt in range(3):  # Try up to 3 times
+                if os.path.exists(file_path) and os.access(file_path, os.R_OK):
+                    try:
+                        # Test if file can be opened and read
+                        with open(file_path, 'rb') as test_file:
+                            test_file.read(1024)  # Try to read some data
+                        file_ready = True
+                        logger.info(f"File verified as ready after {attempt} attempts")
+                        break
+                    except Exception as e:
+                        logger.warning(f"File not yet ready for download (attempt {attempt+1}): {e}")
+                        time.sleep(2)  # Wait 2 seconds before trying again
+                else:
+                    logger.warning(f"File not accessible for download (attempt {attempt+1})")
+                    time.sleep(2)  # Wait before trying again
+            
+            if not file_ready:
+                return jsonify({'error': 'File exists but is not ready for download. Please try again.'}), 503
+                
             logger.info(f"Sending file: {file_path}")
             response = send_file(
                 file_path,
@@ -446,9 +485,13 @@ def download_file(job_id):
                 download_name=os.path.basename(file_path)
             )
             
-            # Clean up job files after successful download
-            # We do this in a separate thread to not block the download
-            cleanup_thread = threading.Thread(target=cleanup_job_files, args=(job_id,))
+            # Clean up job files after successful download with longer delay
+            # Increase the delay in cleanup_job_files to give browser more time
+            def delayed_cleanup(job_id):
+                time.sleep(15)  # Wait longer before cleanup
+                cleanup_job_files(job_id)
+
+            cleanup_thread = threading.Thread(target=delayed_cleanup, args=(job_id,))
             cleanup_thread.daemon = True
             cleanup_thread.start()
             
