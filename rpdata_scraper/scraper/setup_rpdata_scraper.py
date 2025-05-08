@@ -243,6 +243,11 @@ class RPDataScraper(RPDataBase):
             if not self.safe_navigate(self.login_url):
                 logger.error("Failed to navigate to login page, cannot login")
                 return False
+        
+            # Add cancellation check after navigation
+            if hasattr(self, 'check_cancelled') and self.check_cancelled():
+                logger.info("Cancellation detected during login navigation")
+                return False
             
             # Brief wait for login page to load
             time.sleep(1)
@@ -468,6 +473,11 @@ class RPDataScraper(RPDataBase):
         logger.info(f"===== SEARCHING FOR LOCATIONS: {locations} =====")
         
         try:
+            # Add cancellation check after navigation
+            if hasattr(self, 'check_cancelled') and self.check_cancelled():
+                logger.info("Cancellation detected during login navigation")
+                return False
+        
             # If the search type is "For Sale" or "Sales" we just click on the search bar and pick first dropdown
             if search_type in ["For Sale", "Sales"]:
                 logger.info(f"Search type is {search_type}, using first dropdown option")
@@ -756,6 +766,11 @@ class RPDataScraper(RPDataBase):
         logger.info(f"Floor Area: {min_floor_area} - {max_floor_area}")
         
         try:
+            # Add cancellation check
+            if hasattr(self, 'check_cancelled') and self.check_cancelled():
+                logger.info("Cancellation detected during login navigation")
+                return False
+            
             # Brief wait for the results page to load
             time.sleep(0.5)
             
@@ -1070,6 +1085,11 @@ class RPDataScraper(RPDataBase):
         logger.info("===== SELECTING ALL RESULTS =====")
         
         try:
+            # Add cancellation check
+            if hasattr(self, 'check_cancelled') and self.check_cancelled():
+                logger.info("Cancellation detected during login navigation")
+                return False
+            
             # Brief wait for results page to load
             time.sleep(0.5)
             
