@@ -193,7 +193,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 scraper.close()
                 return result_files, None
 
-            if not scraper.apply_filters(property_types, min_floor_area, max_floor_area):
+            if not scraper.apply_filters(property_types, min_floor_area, max_floor_area, progress_callback, milestones, search_type):
                 logger.error(f"Failed to apply filters for: {search_type}, skipping")
                 continue
 

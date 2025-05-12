@@ -217,7 +217,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
 
         # Wait for files to finalize
         logger.info("Waiting for files to finalize...")
-        time.sleep(3)
+        time.sleep(2)
         
         # Check cancellation before merging
         if is_cancelled() or safe_progress_callback(PROGRESS_MILESTONES['merge_start'], "Starting merge process...") is False:

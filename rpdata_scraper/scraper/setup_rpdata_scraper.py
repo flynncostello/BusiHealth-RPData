@@ -753,7 +753,7 @@ class RPDataScraper(RPDataBase):
             return False
 
 
-    def apply_filters(self, property_types, min_floor_area, max_floor_area):
+    def apply_filters(self, property_types, min_floor_area, max_floor_area, progress_callback=None, milestones=None, search_type=None):
         """
         Apply filters for property types and floor area.
         Returns:
@@ -878,6 +878,8 @@ class RPDataScraper(RPDataBase):
                         logger.error(f"Error setting floor area: {e}")
                 else:
                     logger.warning("Floor Area section not found")
+
+            progress_callback(milestones['filters'], f"Applying filters for {search_type}...")
             
             # FASTER PROPERTY TYPE SELECTION: Use faster methods for checkboxes
             property_section_selectors = [
@@ -959,6 +961,10 @@ class RPDataScraper(RPDataBase):
                     logger.error(f"Error handling property types: {e}")
             else:
                 logger.warning("Property Type section not found")
+            
+
+            progress_callback(milestones['filters'], f"Applying filters for {search_type}...")
+
             
             # Minimal delay before applying filters
             time.sleep(0.2)
