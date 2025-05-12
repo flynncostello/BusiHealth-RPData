@@ -6,32 +6,13 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from setup_rpdata_scraper import RPDataScraper, logger
 
+
 def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", 
                   headless=False, progress_callback=None, download_dir=None):
     if progress_callback is None:
         def progress_callback(percentage, message):
             pass
             return True
-    
-    # Add global progress protection to ensure values never decrease
-    highest_percentage_seen = 0
-    original_callback = progress_callback
-    
-    def protected_progress_callback(percentage, message):
-        nonlocal highest_percentage_seen
-        
-        # Ensure progress never goes backwards
-        if percentage > highest_percentage_seen:
-            highest_percentage_seen = percentage
-        else:
-            # If a lower percentage is reported, use the highest we've seen
-            percentage = highest_percentage_seen
-            
-        # Call the original callback with the adjusted percentage
-        return original_callback(percentage, message)
-    
-    # Replace the callback with our protected version
-    progress_callback = protected_progress_callback
     
     if download_dir is None:
         download_dir = os.path.join(os.getcwd(), "downloads")
@@ -52,12 +33,13 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             scraper.close()
             return {}, None
         
-        # Added: Check cancellation more frequently inside long operations
+        # Added: Check cancellation more frequently inside long operations  
         def check_cancelled():
-            if progress_callback and progress_callback(highest_percentage_seen, "Checking if cancelled...") is False:
+            if progress_callback and progress_callback(highest_percentage_seen, None) is False:
                 logger.info("Cancellation detected during operation")
                 return True
             return False
+        
         # Pass this check function to the scraper
         scraper.check_cancelled = check_cancelled
 

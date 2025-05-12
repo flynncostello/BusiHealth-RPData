@@ -289,8 +289,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         .then(fileCheckResponse => fileCheckResponse.json())
                         .then(fileStatus => {
                             // Only show download button if we've reached 100% and status is completed
-                            if (fileStatus.status === 'completed' && fileStatus.result_file) {
-                                // We've double-checked that the status is still completed
+                            if (fileStatus.status === 'completed' && fileStatus.result_file && fileStatus.download_ready === true) {
+                                // We've double-checked that the status is still completed and file is ready
                                 clearInterval(statusInterval);
                                 statusInterval = null;
                                 

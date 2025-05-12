@@ -152,7 +152,41 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             business_type, headless, download_dir, output_dir):
     """Run the main processing job in a background thread with job-specific directories"""
     try:
-        update_job_status(job_id, 'running', 2, 'Initializing search...')
+        # Define progress milestones with smoother progression
+        PROGRESS_MILESTONES = {
+            'start': 5,
+            'login_start': 8,
+            'login_complete': 15,
+            'rent_start': 20,
+            'rent_complete': 45,
+            'sale_start': 50,
+            'sale_complete': 75,
+            'sales_start': 78,
+            'sales_complete': 90,
+            'merge_start': 92,
+            'merge_complete': 98,
+            'file_ready': 100
+        }
+        
+        # Create smooth progress callback with meaningful messages
+        def progress_callback(percentage, message):
+            # Clean up the message - remove cancellation check messages  
+            if 'cancelled' in message.lower() or 'checking' in message.lower():
+                return True  # Skip these messages
+                
+            # Don't let progress go backwards, but allow natural progression
+            current_progress = jobs[job_id].get('progress', 0)
+            if percentage < current_progress:
+                # Only use current progress if the new percentage is significantly lower
+                if current_progress - percentage > 5:
+                    percentage = current_progress
+            
+            update_job_status(job_id, 'running', percentage, message)
+            
+            # Check for cancellation
+            return not check_if_cancelled(job_id)
+        
+        update_job_status(job_id, 'running', PROGRESS_MILESTONES['start'], 'Initializing search environment...')
         
         # Check if job is cancelled before starting
         if check_if_cancelled(job_id):
@@ -160,38 +194,15 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             cleanup_job_files(job_id)
             return
         
-        # Track the highest percentage seen so far
-        highest_percentage = 2  # Start with the initial value
-        
-        # Create progress callback function with progress protection
-        def progress_callback(percentage, message):
-            nonlocal highest_percentage
-            
-            # Only increase percentage, never decrease
-            if percentage > highest_percentage:
-                highest_percentage = percentage
-            else:
-                # If current percentage is lower, use the highest one instead
-                percentage = highest_percentage
-            
-            # Update job status with the adjusted percentage
-            update_job_status(job_id, 'running', percentage, message)
-            
-            # Check for cancellation during each callback
-            if check_if_cancelled(job_id):
-                logger.info(f"Job {job_id} cancelled during progress callback")
-                return False  # Signal to stop processing
-            return True  # Signal to continue processing
-        
-        # Call main function from rpdata_scraper with job-specific directories
-        logger.info(f"About to start MAIN, headless={headless}")
+        # Call main function from rpdata_scraper
+        logger.info(f"Starting main scraper, headless={headless}")
         result = main(
             locations=locations,
             property_types=property_types,
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             business_type=business_type,
-            headless=headless,  # Should be headless=headless, normally
+            headless=headless,
             progress_callback=progress_callback,
             download_dir=download_dir,
             output_dir=output_dir
@@ -208,89 +219,64 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             update_job_status(job_id, 'error', 0, 'No results found. Please check your search criteria.')
             return
         
-        # Check if processing was successful
-        if result:
-            # Find the most recent file in the job's merged directory
-            if os.path.exists(output_dir):
-                files = os.listdir(output_dir)
-                if files:
-                    # Sort by modification time (newest first)
-                    files.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
-                    result_file = os.path.join(output_dir, files[0])
-                    
-                    # Log file details for debugging
-                    logger.info(f"Found result file for job {job_id}: {result_file}")
-                    logger.info(f"File exists: {os.path.exists(result_file)}")
-                    logger.info(f"File size: {os.path.getsize(result_file) if os.path.exists(result_file) else 'N/A'}")
-                    
-                    # Ensure the file path is absolute
-                    result_file = os.path.abspath(result_file)
-                    logger.info(f"Absolute file path: {result_file}")
-                    
-                    # Add additional delay before file verification
-                    time.sleep(5)  # Add 5 second pause before checking file
-                    
-                    # Add a delay to ensure file is fully written and accessible
-                    logger.info(f"Ensuring file is ready before marking job as complete...")
-                    for attempt in range(5):  # Try up to 5 times
-                        if os.path.exists(result_file) and os.access(result_file, os.R_OK):
-                            try:
-                                # Test if file can be opened
-                                with open(result_file, 'rb') as test_file:
-                                    test_file.read(1024 * (attempt + 1))  # Read more data with each attempt
-                                logger.info(f"File is confirmed ready after {attempt} attempts")
-                                break
-                            except Exception as e:
-                                logger.warning(f"File not yet ready (attempt {attempt+1}): {e}")
-                                time.sleep(2)  # Wait 2 seconds before trying again
-                        else:
-                            logger.warning(f"File not yet accessible (attempt {attempt+1})")
-                            time.sleep(2)  # Wait 2 seconds before trying again
-
-                    # Now update job status with local file path
-                    time.sleep(5)  # Additional delay before marking as completed
-                    logger.info(f"Marking job {job_id} as completed with file: {result_file}")
-                    # Update job status to completed
-                    update_job_status(job_id, 'completed', 100, 'Processing complete!', result_file)
-                    
-                    # Double-check the status was properly saved to disk
-                    try:
-                        with open(f'tmp/{job_id}.json', 'r') as f:
-                            saved_status = json.load(f)
-                            if saved_status.get('status') != 'completed':
-                                logger.warning(f"Status was not properly saved as completed. Re-saving...")
-                                update_job_status(job_id, 'completed', 100, 'Processing complete!', result_file)
-                    except Exception as e:
-                        logger.error(f"Error checking saved status: {e}")
-                        # Try once more to update status
-                        update_job_status(job_id, 'completed', 100, 'Processing complete!', result_file)
-                else:
-                    logger.error(f"No files found in {output_dir} for job {job_id}")
-                    update_job_status(job_id, 'error', 0, 'No files found in merged_properties directory')
-            else:
-                logger.error(f"Directory not found: {output_dir} for job {job_id}")
-                update_job_status(job_id, 'error', 0, 'merged_properties directory not found')
-        else:
-            logger.error(f"Processing failed for job {job_id} - main() returned falsy value")
-            update_job_status(job_id, 'error', 0, 'Processing failed')
+        # Update progress to merge phase
+        progress_callback(PROGRESS_MILESTONES['merge_start'], "Processing files into final merged file...")
         
-        # Double-check that job was properly marked as completed if we got here
-        if result and job_id in jobs and jobs[job_id]['status'] != 'completed' and not check_if_cancelled(job_id):
-            logger.info(f"Final status check: Job {job_id} wasn't properly marked as completed. Fixing status...")
-            # Find the result file one more time
-            try:
-                if os.path.exists(output_dir):
-                    files = os.listdir(output_dir)
-                    if files:
-                        files.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
-                        result_file = os.path.join(output_dir, files[0])
-                        result_file = os.path.abspath(result_file)
+        # Verify the result directory exists and has files
+        if result and os.path.exists(result):
+            files = os.listdir(result)
+            if files:
+                # Sort by modification time (newest first)
+                files.sort(key=lambda x: os.path.getmtime(os.path.join(result, x)), reverse=True)
+                result_file = os.path.join(result, files[0])
+                result_file = os.path.abspath(result_file)
+                
+                # Update progress but don't mark as complete yet
+                progress_callback(PROGRESS_MILESTONES['merge_complete'], "Verifying file is ready for download...")
+                
+                # Enhanced file verification - ensure it's completely written and accessible
+                logger.info(f"Verifying file is ready: {result_file}")
+                file_ready = False
+                
+                # More robust verification with multiple checks
+                for attempt in range(10):  # Increased from 5 to 10 attempts
+                    if check_if_cancelled(job_id):
+                        return
                         
-                        # Force status update
-                        update_job_status(job_id, 'completed', 100, 'Processing complete!', result_file)
-                        logger.info(f"Final status check: Successfully recovered job status for {job_id}")
-            except Exception as e:
-                logger.error(f"Failed during final status recovery: {e}")
+                    if os.path.exists(result_file) and os.access(result_file, os.R_OK):
+                        try:
+                            # Test file accessibility comprehensively
+                            file_size = os.path.getsize(result_file)
+                            if file_size > 0:  # Ensure file is not empty
+                                with open(result_file, 'rb') as test_file:
+                                    # Read chunks to verify file integrity
+                                    test_file.read(1024)
+                                    test_file.seek(0, 2)  # Seek to end
+                                    actual_size = test_file.tell()
+                                    if actual_size == file_size:  # File size matches
+                                        file_ready = True
+                                        logger.info(f"File verified as ready after {attempt+1} attempts")
+                                        break
+                        except Exception as e:
+                            logger.warning(f"File verification attempt {attempt+1} failed: {e}")
+                    
+                    # Exponential backoff with longer delays
+                    time.sleep(min(2 ** attempt, 8))  # Max 8 seconds between attempts
+                
+                if not file_ready:
+                    logger.error("File verification failed after all attempts")
+                    update_job_status(job_id, 'error', 0, 'File verification failed. Please try again.')
+                    return
+                
+                # Only now mark as complete when file is truly ready
+                logger.info(f"File is ready, marking job {job_id} as completed")
+                update_job_status(job_id, 'completed', PROGRESS_MILESTONES['file_ready'], 'File ready for download!', result_file)
+            else:
+                logger.error(f"No files found in {result}")
+                update_job_status(job_id, 'error', 0, 'No files found in output directory')
+        else:
+            logger.error(f"Result directory not found: {result}")
+            update_job_status(job_id, 'error', 0, 'Output directory not found')
     
     except Exception as e:
         logger.error(f"Exception in run_job for job {job_id}: {str(e)}")
@@ -313,19 +299,18 @@ def check_if_cancelled(job_id):
             # If we can't load the status, assume not cancelled
             return False
     
-    # If job was cancelled, ensure immediate cleanup happens
-    if jobs[job_id].get('cancelled', False):
-        logger.info(f"Job {job_id} has been marked as cancelled")
-        return True
-    
-    return False
-
+    # Return cancellation status
+    return jobs[job_id].get('cancelled', False)
 
 def update_job_status(job_id, status, progress, message, result_file=None):
     """Update the status of a job"""
     if job_id in jobs:
         current_job = jobs[job_id]
         cancelled = current_job.get('cancelled', False)
+        
+        # If cancelled, don't update status further
+        if cancelled and status != 'cancelled':
+            return
         
         jobs[job_id] = {
             'status': 'cancelled' if cancelled else status,
@@ -360,63 +345,69 @@ def update_job_status(job_id, status, progress, message, result_file=None):
 
 def cleanup_job_files(job_id):
     """Clean up job-specific directories after successful download"""
-    import time
-    time.sleep(10)  # Give browser time to complete download
-    logger.info(f"Cleaning up job files for {job_id}")
+    # Don't cleanup immediately - allow time for download
+    def delayed_cleanup():
+        time.sleep(30)  # Wait 30 seconds for download to complete
+        logger.info(f"Cleaning up job files for {job_id}")
 
-    try:
-        if job_id not in jobs:
-            logger.warning(f"Cannot cleanup job {job_id}: job not found in memory")
-            # Try to load from disk
-            try:
-                with open(f'tmp/{job_id}.json', 'r') as f:
-                    jobs[job_id] = json.load(f)
-            except Exception as e:
-                logger.warning(f"Could not load job {job_id} from disk: {e}")
-                return
-        
-        download_dir = jobs[job_id].get('download_dir')
-        merged_dir = jobs[job_id].get('merged_dir')
-        
-        # Clean up download directory
-        if download_dir and os.path.exists(download_dir):
-            try:
-                shutil.rmtree(download_dir)
-                logger.info(f"Removed download directory for job {job_id}")
-            except Exception as e:
-                logger.error(f"Error removing download directory: {e}")
+        try:
+            if job_id not in jobs:
+                logger.warning(f"Cannot cleanup job {job_id}: job not found in memory")
+                # Try to load from disk
+                try:
+                    with open(f'tmp/{job_id}.json', 'r') as f:
+                        jobs[job_id] = json.load(f)
+                except Exception as e:
+                    logger.warning(f"Could not load job {job_id} from disk: {e}")
+                    return
             
-        # Clean up merged directory (excluding the downloaded file)
-        if merged_dir and os.path.exists(merged_dir):
-            try:
-                shutil.rmtree(merged_dir)
-                logger.info(f"Removed merged directory for job {job_id}")
-            except Exception as e:
-                logger.error(f"Error removing merged directory: {e}")
-
+            download_dir = jobs[job_id].get('download_dir')
+            merged_dir = jobs[job_id].get('merged_dir')
+            
+            # Clean up download directory
+            if download_dir and os.path.exists(download_dir):
+                try:
+                    shutil.rmtree(download_dir)
+                    logger.info(f"Removed download directory for job {job_id}")
+                except Exception as e:
+                    logger.error(f"Error removing download directory: {e}")
                 
-        # Remove status file
-        status_file = f'tmp/{job_id}.json'
-        if os.path.exists(status_file):
-            try:
-                os.remove(status_file)
-                logger.info(f"Removed status file for job {job_id}")
-            except Exception as e:
-                logger.error(f"Error removing status file: {e}")
+            # Clean up merged directory
+            if merged_dir and os.path.exists(merged_dir):
+                try:
+                    shutil.rmtree(merged_dir)
+                    logger.info(f"Removed merged directory for job {job_id}")
+                except Exception as e:
+                    logger.error(f"Error removing merged directory: {e}")
+
+                    
+            # Remove status file
+            status_file = f'tmp/{job_id}.json'
+            if os.path.exists(status_file):
+                try:
+                    os.remove(status_file)
+                    logger.info(f"Removed status file for job {job_id}")
+                except Exception as e:
+                    logger.error(f"Error removing status file: {e}")
+                
+            logger.info(f"Cleanup completed for job {job_id}")
             
-        logger.info(f"Cleanup completed for job {job_id}")
-        
-        # Remove from memory
-        if job_id in jobs:
-            del jobs[job_id]
-            
-    except Exception as e:
-        logger.error(f"Error cleaning up job {job_id}: {str(e)}")
-        logger.error(traceback.format_exc())
+            # Remove from memory
+            if job_id in jobs:
+                del jobs[job_id]
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up job {job_id}: {str(e)}")
+            logger.error(traceback.format_exc())
+    
+    # Run cleanup in a separate thread to not block the main process
+    cleanup_thread = threading.Thread(target=delayed_cleanup)
+    cleanup_thread.daemon = True
+    cleanup_thread.start()
 
 @app.route('/api/status/<job_id>')
 def job_status(job_id):
-    """Get the status of a job with improved download readiness checks"""
+    """Get the status of a job"""
     try:
         # Check memory cache first
         status = None
@@ -446,12 +437,9 @@ def job_status(job_id):
 
 @app.route('/api/download/<job_id>')
 def download_file(job_id):
-    """Download the generated Excel file"""
+    """Download the generated Excel file with enhanced verification"""
     try:
         logger.info(f"Download requested for job {job_id}")
-        
-        # Add initial delay to ensure background processes have time to update status
-        time.sleep(3)
         
         # Get job status
         status = None
@@ -474,130 +462,65 @@ def download_file(job_id):
             logger.error(f"No status found for job {job_id}")
             return jsonify({'error': 'Job status not found'}), 404
             
-        logger.info(f"Job status: {status}")
-        
-        # Get file path
-        file_path = status.get('result_file')
-        if not file_path:
-            logger.error("No result file path in job status")
-            return jsonify({'error': 'No result file path in job status'}), 400
-        
-        logger.info(f"Checking file: {file_path}")
-        logger.info(f"File exists: {os.path.exists(file_path)}")
-        
-        # If job status isn't completed but file exists, try to fix the status
-        if status.get('status') != 'completed' and os.path.exists(file_path):
-            logger.info(f"File exists but job status is '{status.get('status')}'. Attempting to fix status...")
-            status['status'] = 'completed'
-            status['progress'] = 100
-            status['message'] = 'Processing complete!'
-            
-            # Save corrected status
-            jobs[job_id] = status
-            with open(f'tmp/{job_id}.json', 'w') as f:
-                json.dump(status, f)
-            
-            logger.info(f"Status corrected to 'completed' for job {job_id}")
-        
-        # Still check if job is marked as completed after potential correction
+        # Verify job is completed
         if status.get('status') != 'completed':
             logger.error(f"Job not completed: {status.get('status')}")
             return jsonify({
                 'error': 'Job not completed', 
                 'status': status.get('status'),
-                'file_exists': os.path.exists(file_path),
-                'message': 'File found but job status is not complete. Please try again in a few seconds.'
+                'message': 'File is not ready yet. Please wait...'
             }), 400
         
-        # If file doesn't exist at the provided path, look for alternatives
-        if not os.path.exists(file_path):
-            logger.warning(f"File not found at {file_path}, searching for alternatives...")
-            
-            # Try looking in the job's merged directory
-            job_merged_dir = status.get('merged_dir')
-            if job_merged_dir and os.path.exists(job_merged_dir):
-                files = os.listdir(job_merged_dir)
-                if files:
-                    # Sort by modification time (newest first)
-                    files.sort(key=lambda x: os.path.getmtime(os.path.join(job_merged_dir, x)), reverse=True)
-                    alt_file_path = os.path.join(job_merged_dir, files[0])
-                    logger.info(f"Original file not found, trying alternative: {alt_file_path}")
-                    
-                    if os.path.exists(alt_file_path):
-                        file_path = alt_file_path
-                        # Update job status with correct path
-                        status['result_file'] = file_path
-                        jobs[job_id] = status
-                        # Save to file
-                        with open(f'tmp/{job_id}.json', 'w') as f:
-                            json.dump(status, f)
-                        logger.info(f"Updated result_file path to: {file_path}")
-                    else:
-                        logger.error(f"Alternative file not found: {alt_file_path}")
-                        return jsonify({'error': 'File not found at specified path'}), 404
-                else:
-                    logger.error(f"No files in {job_merged_dir}")
-                    return jsonify({'error': 'No files in merged_properties directory'}), 404
-            else:
-                logger.error(f"Directory not found: {job_merged_dir}")
-                return jsonify({'error': 'File not found at specified path'}), 404
+        # Get file path
+        file_path = status.get('result_file')
+        if not file_path:
+            logger.error("No result file path in job status")
+            return jsonify({'error': 'No result file found'}), 404
         
-        # Verify file is ready before sending with multiple retries
+        # Enhanced file verification before download
+        logger.info(f"Verifying file before download: {file_path}")
+        
+        # Multiple verification steps
+        if not os.path.exists(file_path):
+            logger.error(f"File does not exist: {file_path}")
+            return jsonify({'error': 'File not found'}), 404
+        
+        # Verify file is readable and not empty
         try:
-            logger.info(f"Verifying file is ready before sending: {file_path}")
-            file_ready = False
-            
-            # Try up to 5 times with increasing delays
-            for attempt in range(5):
-                if os.path.exists(file_path) and os.access(file_path, os.R_OK):
-                    try:
-                        # Test if file can be opened and read
-                        with open(file_path, 'rb') as test_file:
-                            # Try to read more data each time
-                            test_file.read(1024 * (attempt + 1))
-                        
-                        file_ready = True
-                        logger.info(f"File verified as ready after {attempt+1} attempts")
-                        break
-                    except Exception as e:
-                        logger.warning(f"File not yet ready for download (attempt {attempt+1}): {e}")
-                        # Exponential backoff: 1s, 2s, 4s, 8s
-                        time.sleep(2 ** attempt)
-                else:
-                    logger.warning(f"File not accessible for download (attempt {attempt+1})")
-                    time.sleep(2 ** attempt)
-            
-            if not file_ready:
-                logger.error("File exists but is not ready for download after multiple attempts")
-                return jsonify({
-                    'error': 'File exists but is not ready for download. Please try again in a few seconds.'
-                }), 503
-            
-            # If we get here, the file is confirmed ready
-            logger.info(f"File confirmed ready, sending: {file_path}")
-            
+            file_size = os.path.getsize(file_path)
+            if file_size == 0:
+                logger.error(f"File is empty: {file_path}")
+                return jsonify({'error': 'File is empty'}), 500
+                
+            # Attempt to read the file to verify it's not corrupted
+            with open(file_path, 'rb') as test_file:
+                # Read a chunk to verify file integrity
+                test_file.read(1024)
+                
+            logger.info(f"File verified successfully: {file_path} (size: {file_size} bytes)")
+        except Exception as e:
+            logger.error(f"File verification failed: {str(e)}")
+            return jsonify({'error': f'File verification failed: {str(e)}'}), 500
+        
+        try:
+            # Send the file
             response = send_file(
                 file_path,
                 as_attachment=True,
                 download_name=os.path.basename(file_path)
             )
             
-            # Use longer delay before cleanup to ensure download completes
-            def delayed_cleanup(job_id):
-                # Wait longer before starting cleanup
-                time.sleep(30)  # 30 seconds should be enough even for slow connections
-                cleanup_job_files(job_id)
-
-            cleanup_thread = threading.Thread(target=delayed_cleanup, args=(job_id,))
-            cleanup_thread.daemon = True
-            cleanup_thread.start()
+            logger.info(f"Successfully initiated download for job {job_id}")
+            
+            # Schedule cleanup after download
+            cleanup_job_files(job_id)
             
             return response
             
         except Exception as e:
-            logger.error(f"Error preparing file for download: {str(e)}")
+            logger.error(f"Error sending file: {str(e)}")
             logger.error(traceback.format_exc())
-            return jsonify({'error': f'Error preparing file: {str(e)}'}), 500
+            return jsonify({'error': f'Error sending file: {str(e)}'}), 500
             
     except Exception as e:
         logger.error(f"Error in download_file endpoint: {str(e)}")
@@ -633,26 +556,12 @@ def cancel_job():
         jobs[job_id]['status'] = 'cancelled'
         jobs[job_id]['message'] = 'Job cancelled by user'
         
-        # Save to disk - this is critical for the background process to detect cancellation
+        # Save to disk immediately
         with open(f'tmp/{job_id}.json', 'w') as f:
             json.dump(jobs[job_id], f)
         
-        # IMPORTANT: Do NOT call cleanup_job_files() here!
-        # Let the background process detect cancellation and clean itself up
-        # This prevents the race condition where we delete the file before the process can see it
-        
-        # Schedule a delayed cleanup only if the job doesn't clean up after itself
-        def delayed_cleanup():
-            time.sleep(30)  # Wait 30 seconds
-            # Check if job still exists
-            if job_id in jobs:
-                logger.info(f"Performing delayed cleanup for job {job_id}")
-                cleanup_job_files(job_id)
-        
-        # Start delayed cleanup thread
-        cleanup_thread = threading.Thread(target=delayed_cleanup)
-        cleanup_thread.daemon = True
-        cleanup_thread.start()
+        # Schedule cleanup
+        cleanup_job_files(job_id)
         
         return jsonify({'success': True, 'message': 'Job cancelled successfully'})
     except Exception as e:

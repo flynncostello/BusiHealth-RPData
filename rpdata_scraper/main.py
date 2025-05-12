@@ -55,12 +55,23 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             logger.info(f"Progress: {percentage}% - {message}")
             return True  # Always continue
     
-    # Global scraper instance that can be terminated on cancellation
-    global_scraper = None
+    # Define progress milestones that align with app.py
+    PROGRESS_MILESTONES = {
+        'login_start': 8,
+        'login_complete': 15,
+        'rent_start': 20,
+        'rent_complete': 45,
+        'sale_start': 50,
+        'sale_complete': 75,
+        'sales_start': 78,
+        'sales_complete': 90,
+        'merge_start': 92,
+        'merge_complete': 98
+    }
     
     try:
         # Check for early cancellation
-        if progress_callback(1, "Initializing RP Data scraper...") is False:
+        if progress_callback(5, "Initializing RP Data scraper...") is False:
             logger.info("Job cancelled before starting")
             return None
 
@@ -102,25 +113,57 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Download Directory: {download_dir}")
         logger.info(f"Output Directory: {output_dir}")
         
-        # Check for cancellation before starting scraper
-        if progress_callback(3, "Setting up scraper...") is False:
-            logger.info("Job cancelled during setup")
-            return None
+        # Create enhanced progress callback for scraping phase
+        def scraping_progress_callback(percentage, message):
+            # Map scraper progress to our milestones
+            if 'login' in message.lower():
+                if 'starting' in message.lower() or 'logging' in message.lower():
+                    actual_percentage = PROGRESS_MILESTONES['login_start']
+                else:
+                    # Scale login progress between start and complete
+                    actual_percentage = PROGRESS_MILESTONES['login_start'] + \
+                        (percentage / 100) * (PROGRESS_MILESTONES['login_complete'] - PROGRESS_MILESTONES['login_start'])
+            elif 'for rent' in message.lower():
+                if 'starting' in message.lower():
+                    actual_percentage = PROGRESS_MILESTONES['rent_start']
+                else:
+                    # Scale rent progress between start and complete
+                    actual_percentage = PROGRESS_MILESTONES['rent_start'] + \
+                        (percentage / 100) * (PROGRESS_MILESTONES['rent_complete'] - PROGRESS_MILESTONES['rent_start'])
+            elif 'for sale' in message.lower():
+                if 'starting' in message.lower():
+                    actual_percentage = PROGRESS_MILESTONES['sale_start']
+                else:
+                    # Scale sale progress between start and complete
+                    actual_percentage = PROGRESS_MILESTONES['sale_start'] + \
+                        (percentage / 100) * (PROGRESS_MILESTONES['sale_complete'] - PROGRESS_MILESTONES['sale_start'])
+            elif 'sales' in message.lower():
+                if 'starting' in message.lower():
+                    actual_percentage = PROGRESS_MILESTONES['sales_start']
+                else:
+                    # Scale sales progress between start and complete
+                    actual_percentage = PROGRESS_MILESTONES['sales_start'] + \
+                        (percentage / 100) * (PROGRESS_MILESTONES['sales_complete'] - PROGRESS_MILESTONES['sales_start'])
+            else:
+                # For other messages, distribute remaining percentage
+                actual_percentage = max(percentage, 8)  # Never go below login start
+            
+            return progress_callback(int(actual_percentage), message)
         
-        # Modify the scrape_rpdata function to store the scraper instance globally
-        # so it can be terminated if needed
+        # Step 1: Scrape the data
+        logger.info("\n===== STEP 1: SCRAPING DATA FROM RP DATA =====\n")
         result_files, global_scraper = scrape_rpdata(
             locations=locations,
             property_types=property_types,
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             headless=headless,
-            progress_callback=progress_callback,
+            progress_callback=scraping_progress_callback,
             download_dir=download_dir
         )
         
         # Check for cancellation after scraping
-        if progress_callback(92, "Scraping completed, preparing to merge files...") is False:
+        if progress_callback(PROGRESS_MILESTONES['sales_complete'], "Scraping completed, preparing to merge files...") is False:
             logger.info("Job cancelled after scraping")
             if global_scraper:
                 try:
@@ -136,20 +179,24 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Downloaded files: {result_files}")
 
         # Add delay to ensure files are completely written
-        logger.info("Waiting 3 seconds for files to finalize...")
+        logger.info("Waiting for files to finalize...")
         time.sleep(3)  # 3 second delay
         
         # Check for cancellation again
-        if progress_callback(94, "Files downloaded, starting merge process...") is False:
+        if progress_callback(PROGRESS_MILESTONES['merge_start'], "Starting merge process...") is False:
             logger.info("Job cancelled before merging")
             return None
         
         # Step 2: Process and merge the Excel files
         logger.info("\n===== STEP 2: PROCESSING AND MERGING FILES =====\n")
-        if progress_callback(95, "Starting to process files into complete merged file...") is False:
-            logger.info("Job cancelled before processing")
-            return None
-
+        
+        # Create enhanced progress callback for merge phase
+        def merge_progress_callback(percentage, message):
+            # Map merge progress to our milestones
+            actual_percentage = PROGRESS_MILESTONES['merge_start'] + \
+                (percentage / 100) * (PROGRESS_MILESTONES['merge_complete'] - PROGRESS_MILESTONES['merge_start'])
+            return progress_callback(int(actual_percentage), message)
+        
         from merge_excel import process_excel_files
         success = process_excel_files(
             files_dict=result_files,
@@ -159,7 +206,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             max_floor=max_floor_area,
             business_type=business_type,
             headless=headless,
-            progress_callback=progress_callback,
+            progress_callback=merge_progress_callback,
             output_dir=output_dir
         )
         
@@ -168,24 +215,13 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Total processing time: {elapsed_time:.2f} seconds")
         
         # Final cancellation check
-        if progress_callback(99, "Processing complete, preparing final file...") is False:
+        if progress_callback(98, "Processing complete, preparing final file...") is False:
             logger.info("Job cancelled at final stage")
             return None
         
         if success:
-            # Get the name of the most recently created file in the output directory
-            if os.path.exists(output_dir) and os.listdir(output_dir):
-                files = os.listdir(output_dir)
-                if files:
-                    # Sort by modification time (newest first)
-                    files.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
-                    newest_file = os.path.join(output_dir, files[0])
-                    logger.info(f"Processing complete. Merged file saved to: {newest_file}")
-                    
-                    progress_callback(98, f"Processing complete! File saved as {os.path.basename(newest_file)}")
-                    return output_dir
-            
-            logger.info(f"Processing complete. Merged file saved to output directory: {output_dir}")
+            # Return the output directory for further processing in app.py
+            logger.info(f"Processing complete. Files saved to: {output_dir}")
             return output_dir
         else:
             logger.error("Failed to process and merge files")
@@ -199,7 +235,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         return None
     finally:
         # Ensure browser is closed if we have a global scraper instance
-        if global_scraper:
+        if 'global_scraper' in locals() and global_scraper:
             try:
                 global_scraper.close()
                 logger.info("Closed global scraper instance in finally block")
