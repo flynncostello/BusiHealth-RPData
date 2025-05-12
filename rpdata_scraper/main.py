@@ -115,8 +115,11 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         
         # Create enhanced progress callback for scraping phase
         def scraping_progress_callback(percentage, message):
+            # Handle None messages from cancellation checks
+            if message is None:
+                return progress_callback(percentage, None)
             # Map scraper progress to our milestones
-            if 'login' in message.lower():
+            elif 'login' in message.lower():
                 if 'starting' in message.lower() or 'logging' in message.lower():
                     actual_percentage = PROGRESS_MILESTONES['login_start']
                 else:

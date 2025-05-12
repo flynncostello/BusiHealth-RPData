@@ -33,13 +33,12 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             scraper.close()
             return {}, None
         
-        # Added: Check cancellation more frequently inside long operations  
+        # Added: Check cancellation more frequently inside long operations
         def check_cancelled():
-            if progress_callback and progress_callback(highest_percentage_seen, None) is False:
+            if progress_callback and progress_callback(0, None) is False:
                 logger.info("Cancellation detected during operation")
                 return True
             return False
-        
         # Pass this check function to the scraper
         scraper.check_cancelled = check_cancelled
 

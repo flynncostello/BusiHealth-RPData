@@ -170,10 +170,12 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
         
         # Create smooth progress callback with meaningful messages
         def progress_callback(percentage, message):
-            # Clean up the message - remove cancellation check messages  
+            # Clean up the message - remove cancellation check messages
+            if message is None:
+                return True  # Skip None messages (from cancellation checks)
             if 'cancelled' in message.lower() or 'checking' in message.lower():
                 return True  # Skip these messages
-                
+                        
             # Don't let progress go backwards, but allow natural progression
             current_progress = jobs[job_id].get('progress', 0)
             if percentage < current_progress:
