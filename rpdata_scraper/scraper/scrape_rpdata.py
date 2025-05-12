@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Main script for running RP Data scraper
-# Clean implementation with simple cancellation checks and smooth progress
+# Clean implementation with consistent progress flow and robust cancellation
 
 import os
 import sys
@@ -11,10 +11,13 @@ from setup_rpdata_scraper import RPDataScraper, logger
 def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max_floor_area="Max", 
                   headless=False, progress_callback=None, is_cancelled=None, download_dir=None):
     """
-    Scrape RP Data with clean progress reporting and simple cancellation checking.
+    Scrape RP Data with consistent progress reporting and robust cancellation checking.
     
     This function handles all the detailed scraping work with frequent cancellation
-    checks and smooth progress updates that align with the overall job milestones.
+    checks and smooth progress updates that align perfectly with the overall job milestones.
+    
+    The progress flow is designed to be strictly monotonic (always increasing) to prevent
+    race conditions with the UI progress bar.
     
     Args:
         locations: List of locations to search
@@ -50,11 +53,12 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
     if property_types is None:
         property_types = ["Business", "Commercial"]
     
-    scraper = RPDataScraper(headless=headless, download_dir=download_dir)
+    scraper = None
     result_files = {}
     
-    # Define progress milestones that match main.py exactly
+    # Define exact progress milestones that match main.py and app.py
     PROGRESS_MILESTONES = {
+        'start': 5,
         'login_start': 8,
         'login_complete': 15,
         'rent_start': 20,
@@ -65,28 +69,58 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
         'sales_complete': 90
     }
     
-    # Define sub-steps within each search type (as percentages of the range)
-    SEARCH_SUBSTEPS = {
-        'search_start': 0,      # Starting the search
-        'locations_done': 0.25, # Locations searched
-        'filters_done': 0.50,   # Filters applied
-        'selection_done': 0.75, # Results selected
-        'export_done': 1.0      # Export completed
-    }
+    # Define sub-steps within each search type as absolute percentages
+    # This ensures monotonic progress without any backwards movement
+    def get_search_milestones(search_type):
+        """Get absolute progress milestones for a specific search type."""
+        if search_type == 'For Rent':
+            return {
+                'start': PROGRESS_MILESTONES['rent_start'],
+                'locations': PROGRESS_MILESTONES['rent_start'] + 5,    # 25%
+                'filters': PROGRESS_MILESTONES['rent_start'] + 10,     # 30%
+                'selection': PROGRESS_MILESTONES['rent_start'] + 15,   # 35%
+                'export': PROGRESS_MILESTONES['rent_complete']         # 45%
+            }
+        elif search_type == 'For Sale':
+            return {
+                'start': PROGRESS_MILESTONES['sale_start'],
+                'locations': PROGRESS_MILESTONES['sale_start'] + 5,    # 55%
+                'filters': PROGRESS_MILESTONES['sale_start'] + 10,     # 60%
+                'selection': PROGRESS_MILESTONES['sale_start'] + 15,   # 65%
+                'export': PROGRESS_MILESTONES['sale_complete']         # 75%
+            }
+        elif search_type == 'Sales':
+            return {
+                'start': PROGRESS_MILESTONES['sales_start'],
+                'locations': PROGRESS_MILESTONES['sales_start'] + 3,   # 81%
+                'filters': PROGRESS_MILESTONES['sales_start'] + 6,     # 84%
+                'selection': PROGRESS_MILESTONES['sales_start'] + 9,   # 87%
+                'export': PROGRESS_MILESTONES['sales_complete']        # 90%
+            }
+        else:
+            # Fallback for any other search type
+            return {
+                'start': 0,
+                'locations': 25,
+                'filters': 50,
+                'selection': 75,
+                'export': 100
+            }
     
     try:
         # Check cancellation at the very start
         if is_cancelled():
             logger.info("Job cancelled before starting scraper")
-            scraper.close()
             return {}, None
         
-        # Progress update and cancellation check for login
+        # Progress update - login start
         if progress_callback(PROGRESS_MILESTONES['login_start'], "Logging into RP Data...") is False:
             logger.info("Job cancelled before login")
-            scraper.close()
             return {}, None
-            
+        
+        # Initialize scraper
+        scraper = RPDataScraper(headless=headless, download_dir=download_dir)
+        
         # Attempt login
         login_success = scraper.login("busihealth", "Busihealth123")
         if not login_success:
@@ -100,37 +134,17 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             scraper.close()
             return {}, None
 
-        # Define search configurations
+        # Define search configurations in order
         search_configs = [
-            {
-                'name': 'For Rent',
-                'start_milestone': PROGRESS_MILESTONES['rent_start'],
-                'end_milestone': PROGRESS_MILESTONES['rent_complete']
-            },
-            {
-                'name': 'For Sale', 
-                'start_milestone': PROGRESS_MILESTONES['sale_start'],
-                'end_milestone': PROGRESS_MILESTONES['sale_complete']
-            },
-            {
-                'name': 'Sales',
-                'start_milestone': PROGRESS_MILESTONES['sales_start'], 
-                'end_milestone': PROGRESS_MILESTONES['sales_complete']
-            }
+            {'name': 'For Rent'},
+            {'name': 'For Sale'}, 
+            {'name': 'Sales'}
         ]
 
         # Process each search type
         for search_config in search_configs:
             search_type = search_config['name']
-            start_percent = search_config['start_milestone']
-            end_percent = search_config['end_milestone']
-            
-            # Function to calculate progress within this search type
-            def calculate_progress(substep_key):
-                """Calculate the actual progress percentage for a given substep"""
-                substep_percent = SEARCH_SUBSTEPS[substep_key]
-                actual_percent = start_percent + (end_percent - start_percent) * substep_percent
-                return int(actual_percent)
+            milestones = get_search_milestones(search_type)
             
             # Check cancellation before starting this search type
             if is_cancelled():
@@ -138,8 +152,8 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 scraper.close()
                 return result_files, None
             
-            # Start this search type
-            if progress_callback(calculate_progress('search_start'), f"Starting {search_type} search...") is False:
+            # Start this search type - progress update
+            if progress_callback(milestones['start'], f"Starting {search_type} search...") is False:
                 logger.info(f"Job cancelled before {search_type} search")
                 scraper.close()
                 return result_files, None
@@ -158,7 +172,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 return result_files, None
 
             # Search locations with progress update
-            if progress_callback(calculate_progress('locations_done'), f"Searching locations for {search_type}...") is False:
+            if progress_callback(milestones['locations'], f"Searching locations for {search_type}...") is False:
                 logger.info(f"Job cancelled during {search_type} location search")
                 scraper.close()
                 return result_files, None
@@ -174,7 +188,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 return result_files, None
 
             # Apply filters with progress update
-            if progress_callback(calculate_progress('filters_done'), f"Applying filters for {search_type}...") is False:
+            if progress_callback(milestones['filters'], f"Applying filters for {search_type}...") is False:
                 logger.info(f"Job cancelled during {search_type} filters")
                 scraper.close()
                 return result_files, None
@@ -190,7 +204,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 return result_files, None
 
             # Select results with progress update
-            if progress_callback(calculate_progress('selection_done'), f"Selecting results for {search_type}...") is False:
+            if progress_callback(milestones['selection'], f"Selecting results for {search_type}...") is False:
                 logger.info(f"Job cancelled after filter for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -206,7 +220,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 return result_files, None
 
             # Export data with progress update
-            if progress_callback(calculate_progress('export_done'), f"Exporting {search_type} data...") is False:
+            if progress_callback(milestones['export'], f"Exporting {search_type} data...") is False:
                 logger.info(f"Job cancelled before export for {search_type}")
                 scraper.close()
                 return result_files, None
@@ -235,7 +249,7 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
                 logger.info(f"Added file for {search_type}: {downloaded_files[0]}")
 
             # Return to dashboard for next search (if not the last one)
-            if search_type != ['For Rent', 'For Sale', 'Sales'][-1]:
+            if search_type != 'Sales':  # Sales is the last search type
                 if not scraper.return_to_dashboard():
                     logger.error(f"Failed to return to dashboard after: {search_type}, aborting")
                     break
@@ -246,15 +260,18 @@ def scrape_rpdata(locations=None, property_types=None, min_floor_area="Min", max
             scraper.close()
             return result_files, None
         
-        # All searches completed
-        progress_callback(PROGRESS_MILESTONES['sales_complete'], "All RPData downloads completed.")
+        # All searches completed - final progress update
+        progress_callback(PROGRESS_MILESTONES['sales_complete'], "All RP Data downloads completed.")
         return result_files, scraper
 
     except Exception as e:
         logger.error(f"An error occurred during scraping: {e}")
         import traceback
         logger.error(traceback.format_exc())
-        return result_files, scraper
+        if scraper:
+            scraper.close()
+        return result_files, None
+
 
 if __name__ == "__main__":
     # Test with example data
@@ -263,13 +280,22 @@ if __name__ == "__main__":
     min_floor = "Min"
     max_floor = "100"
     
-    result_files, _ = scrape_rpdata(
+    # Test progress callback
+    def test_progress(percentage, message):
+        print(f"Progress: {percentage}% - {message}")
+        return True
+    
+    result_files, scraper = scrape_rpdata(
         locations=locations,
         property_types=property_types,
         min_floor_area=min_floor,
         max_floor_area=max_floor,
-        headless=False
+        headless=True,
+        progress_callback=test_progress
     )
+    
+    if scraper:
+        scraper.close()
     
     logger.info("Scraping completed")
     logger.info(f"Result files: {result_files}")

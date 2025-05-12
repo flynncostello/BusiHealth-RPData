@@ -72,6 +72,8 @@ else:
 jobs = {}
 # Store running job threads to allow termination
 job_threads = {}
+# Add a lock for job status updates to prevent race conditions
+job_status_lock = threading.Lock()
 
 @app.route('/')
 def index():
@@ -125,20 +127,22 @@ def process():
         # Set property types to both Business and Commercial as specified
         property_types = ["Business", "Commercial"]
         
-        # Initialize job status
-        jobs[job_id] = {
-            'status': 'running',
-            'progress': 0,
-            'message': 'Starting property search...',
-            'result_file': None,
-            'download_dir': job_download_dir,
-            'merged_dir': job_merged_dir,
-            'cancelled': False  # Flag to mark job as cancelled
-        }
+        # Initialize job status with thread safety
+        with job_status_lock:
+            jobs[job_id] = {
+                'status': 'initializing',
+                'progress': 0,
+                'message': 'Starting property search...',
+                'result_file': None,
+                'download_dir': job_download_dir,
+                'merged_dir': job_merged_dir,
+                'cancelled': False,  # Flag to mark job as cancelled
+                'file_verified': False,  # New flag to track file verification
+                'created_at': time.time()
+            }
         
-        # Save status to file
-        with open(f'tmp/{job_id}.json', 'w') as f:
-            json.dump(jobs[job_id], f)
+        # Save status to file with proper locking
+        save_job_status_to_file(job_id, jobs[job_id])
         
         # Run the job in a background thread
         thread = threading.Thread(
@@ -159,9 +163,79 @@ def process():
         return jsonify({'error': str(e)}), 500
 
 
+def save_job_status_to_file(job_id, job_status):
+    """
+    Save job status to file with proper locking to prevent race conditions.
+    """
+    status_file = f'tmp/{job_id}.json'
+    temp_file = f'{status_file}.tmp.{os.getpid()}'
+    
+    try:
+        # Write to temporary file first
+        with open(temp_file, 'w') as f:
+            json.dump(job_status, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())  # Force write to disk
+        
+        # Atomic rename (most reliable across platforms)
+        if os.name == 'nt':  # Windows
+            # Windows requires removing existing file first
+            if os.path.exists(status_file):
+                os.remove(status_file)
+        os.rename(temp_file, status_file)
+        
+        logger.debug(f"Successfully saved status for job {job_id}")
+    except Exception as e:
+        logger.error(f"Error saving job status for {job_id}: {e}")
+        # Clean up temp file if it exists
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+
+
+def load_job_status_from_file(job_id):
+    """
+    Load job status from file with retry logic for Azure.
+    """
+    status_file = f'tmp/{job_id}.json'
+    
+    for attempt in range(3):
+        try:
+            if not os.path.exists(status_file):
+                return None
+                
+            # Wait a bit for file to be ready
+            if attempt > 0:
+                time.sleep(0.01 * (2 ** attempt))
+            
+            with open(status_file, 'r') as f:
+                # Try to acquire a shared lock if available
+                if hasattr(fcntl, 'flock'):
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    except IOError:
+                        if attempt < 2:
+                            continue
+                
+                job_status = json.load(f)
+                return job_status
+                
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Error reading job status for {job_id} (attempt {attempt+1}): {e}")
+            if attempt < 2:
+                time.sleep(0.01 * (2 ** attempt))
+                continue
+            else:
+                raise
+    
+    return None
+
+
 def run_job(job_id, locations, property_types, min_floor_area, max_floor_area, 
             business_type, headless, download_dir, output_dir):
-    """Run the main processing job with simplified cancellation and progress tracking"""
+    """Run the main processing job with robust race condition protection and file verification"""
     try:
         # Define clear progress milestones
         PROGRESS_MILESTONES = {
@@ -175,38 +249,85 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             'sales_start': 78,
             'sales_complete': 90,
             'merge_start': 92,
-            'merge_complete': 98,
+            'merge_complete': 95,  # Reduced to allow time for verification
+            'file_verification': 97,
             'file_ready': 100
         }
         
-        # Enhanced cancellation check with logging
+        # Enhanced cancellation check with more robust detection
         def is_cancelled():
-            """Enhanced cancellation check with detailed logging for debugging."""
-            cancelled = check_if_cancelled(job_id)
-            if cancelled:
-                logger.info(f"Cancellation detected for job {job_id} (Azure-safe check)")
-            return cancelled
+            """Enhanced cancellation check with multiple strategies for Azure."""
+            try:
+                # Strategy 1: Check in-memory cache first (fastest)
+                with job_status_lock:
+                    if job_id in jobs and jobs[job_id].get('cancelled', False):
+                        logger.info(f"Cancellation detected in memory for job {job_id}")
+                        return True
+                
+                # Strategy 2: Check file with retry logic
+                job_status = load_job_status_from_file(job_id)
+                if job_status:
+                    # Update in-memory cache
+                    with job_status_lock:
+                        jobs[job_id] = job_status
+                    
+                    if job_status.get('cancelled', False):
+                        logger.info(f"Cancellation detected in file for job {job_id}")
+                        return True
+                
+                return False
+            except Exception as e:
+                logger.warning(f"Error checking cancellation for {job_id}: {e}")
+                return False
         
-        # Enhanced progress callback with more frequent checks
+        # Enhanced progress callback with race condition protection
         def progress_callback(percentage, message):
-            # Log every progress update for debugging
-            logger.debug(f"Progress update for job {job_id}: {percentage}% - {message}")
-            
-            # Skip None messages and cancellation check messages
+            """Enhanced progress callback with race condition prevention."""
             if message is None or (message and 'cancel' in message.lower()):
                 # Still do the cancellation check even for skipped messages
                 return not is_cancelled()
             
-            # Prevent significant backwards progress
-            current_progress = jobs[job_id].get('progress', 0)
-            if percentage < current_progress and current_progress - percentage > 5:
-                percentage = current_progress
-            
-            # Update status
-            update_job_status(job_id, 'running', percentage, message)
-            
-            # Check cancellation after every update
-            return not is_cancelled()
+            try:
+                with job_status_lock:
+                    if job_id not in jobs:
+                        # Try to reload from file
+                        job_status = load_job_status_from_file(job_id)
+                        if job_status:
+                            jobs[job_id] = job_status
+                        else:
+                            logger.warning(f"Job {job_id} not found for progress update")
+                            return not is_cancelled()
+                    
+                    current_job = jobs[job_id]
+                    
+                    # Check if job is cancelled
+                    if current_job.get('cancelled', False):
+                        return False
+                    
+                    # Prevent significant backwards progress (race condition protection)
+                    current_progress = current_job.get('progress', 0)
+                    if isinstance(percentage, (int, float)) and isinstance(current_progress, (int, float)):
+                        if percentage < current_progress - 5:  # Allow small backwards movement for accuracy
+                            logger.debug(f"Prevented backwards progress for {job_id}: {current_progress} -> {percentage}")
+                            percentage = current_progress
+                    
+                    # Update status with validation
+                    jobs[job_id]['status'] = 'running'
+                    jobs[job_id]['progress'] = max(0, min(100, percentage))  # Clamp between 0-100
+                    jobs[job_id]['message'] = message
+                    jobs[job_id]['last_updated'] = time.time()
+                
+                # Save to file
+                save_job_status_to_file(job_id, jobs[job_id])
+                
+                logger.debug(f"Progress update for job {job_id}: {percentage}% - {message}")
+                
+                # Check cancellation after update
+                return not is_cancelled()
+                
+            except Exception as e:
+                logger.error(f"Error in progress callback for {job_id}: {e}")
+                return not is_cancelled()
         
         # Initial progress update
         update_job_status(job_id, 'running', PROGRESS_MILESTONES['start'], 'Initializing search environment...')
@@ -217,7 +338,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             cleanup_job_files(job_id)
             return
         
-        # Call main function with the simple cancellation check
+        # Call main function with the enhanced cancellation check
         logger.info(f"Starting main scraper, headless={headless}")
         result = main(
             locations=locations,
@@ -227,7 +348,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             business_type=business_type,
             headless=headless,
             progress_callback=progress_callback,
-            is_cancelled=is_cancelled,  # Pass the simple function
+            is_cancelled=is_cancelled,
             download_dir=download_dir,
             output_dir=output_dir
         )
@@ -241,49 +362,115 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
         if result == 'No files downloaded':
             update_job_status(job_id, 'error', 0, 'No Results Found on RPData for this search. Please go back to form and try again.')
             return
-        
 
-        # File verification process with cancellation checks
+        # Enhanced file verification process
         if result and os.path.exists(result):
+            # Progress update for verification start
+            progress_callback(PROGRESS_MILESTONES['merge_complete'], "Processing complete. Verifying output files...")
+            
             files = os.listdir(result)
             if files:
                 files.sort(key=lambda x: os.path.getmtime(os.path.join(result, x)), reverse=True)
                 result_file = os.path.join(result, files[0])
                 result_file = os.path.abspath(result_file)
                 
-                progress_callback(PROGRESS_MILESTONES['merge_complete'], "Verifying file is ready for download...")
+                progress_callback(PROGRESS_MILESTONES['file_verification'], "Verifying file integrity and accessibility...")
                 
-                # File verification with cancellation checks
-                logger.info(f"Verifying file: {result_file}")
-                file_ready = False
+                # Enhanced file verification with multiple checks
+                logger.info(f"Starting comprehensive file verification: {result_file}")
                 
-                for attempt in range(10):
-                    if is_cancelled():  # Simple check
+                file_verification_successful = False
+                max_verification_attempts = 15  # Increased for Azure
+                
+                for attempt in range(max_verification_attempts):
+                    if is_cancelled():
+                        logger.info(f"Job {job_id} cancelled during file verification")
                         return
-                        
-                    if os.path.exists(result_file) and os.access(result_file, os.R_OK):
-                        try:
-                            file_size = os.path.getsize(result_file)
-                            if file_size > 0:
-                                with open(result_file, 'rb') as test_file:
-                                    test_file.read(1024)
-                                    test_file.seek(0, 2)
-                                    actual_size = test_file.tell()
-                                    if actual_size == file_size:
-                                        file_ready = True
-                                        logger.info(f"File verified after {attempt+1} attempts")
-                                        break
-                        except Exception as e:
-                            logger.warning(f"Verification attempt {attempt+1} failed: {e}")
                     
-                    time.sleep(min(2 ** attempt, 8))
+                    logger.debug(f"File verification attempt {attempt + 1}/{max_verification_attempts}")
+                    
+                    # Check 1: File exists
+                    if not os.path.exists(result_file):
+                        logger.warning(f"File does not exist on attempt {attempt + 1}")
+                        time.sleep(min(2 ** (attempt // 3), 4))  # Exponential backoff
+                        continue
+                    
+                    # Check 2: File is accessible
+                    if not os.access(result_file, os.R_OK):
+                        logger.warning(f"File not readable on attempt {attempt + 1}")
+                        time.sleep(min(2 ** (attempt // 3), 4))
+                        continue
+                    
+                    try:
+                        # Check 3: File size is reasonable
+                        file_size = os.path.getsize(result_file)
+                        if file_size == 0:
+                            logger.warning(f"File is empty on attempt {attempt + 1}")
+                            time.sleep(min(2 ** (attempt // 3), 4))
+                            continue
+                        
+                        # Check 4: File can be opened and read
+                        with open(result_file, 'rb') as test_file:
+                            # Read file in chunks to verify integrity
+                            chunk_size = 8192
+                            bytes_read = 0
+                            while True:
+                                chunk = test_file.read(chunk_size)
+                                if not chunk:
+                                    break
+                                bytes_read += len(chunk)
+                            
+                            # Verify all bytes were read
+                            test_file.seek(0, 2)
+                            actual_size = test_file.tell()
+                            
+                            if bytes_read == actual_size == file_size:
+                                logger.info(f"File verification successful after {attempt + 1} attempts")
+                                logger.info(f"File size: {file_size} bytes, verified: {bytes_read} bytes")
+                                
+                                # Final check: ensure Excel file is valid by reading header
+                                with open(result_file, 'rb') as excel_check:
+                                    header = excel_check.read(512)
+                                    # Check for Excel file signatures
+                                    if (header.startswith(b'PK\x03\x04') or  # XLSX
+                                        header.startswith(b'\xd0\xcf\x11\xe0') or  # XLS
+                                        b'xl/' in header):  # Additional XLSX check
+                                        file_verification_successful = True
+                                        break
+                                    else:
+                                        logger.warning(f"File doesn't appear to be a valid Excel file on attempt {attempt + 1}")
+                            else:
+                                logger.warning(f"File size mismatch on attempt {attempt + 1}: expected {file_size}, got {actual_size}")
+                    
+                    except Exception as e:
+                        logger.warning(f"File verification attempt {attempt + 1} failed: {e}")
+                    
+                    # Wait before retry, with exponential backoff
+                    time.sleep(min(2 ** (attempt // 3), 4))
                 
-                if not file_ready:
-                    update_job_status(job_id, 'error', 0, 'File verification failed.')
+                if not file_verification_successful:
+                    logger.error(f"File verification failed after {max_verification_attempts} attempts")
+                    update_job_status(job_id, 'error', 0, 'File verification failed. The output file may be corrupted or inaccessible.')
                     return
                 
-                logger.info(f"Marking job {job_id} as completed")
-                update_job_status(job_id, 'completed', PROGRESS_MILESTONES['file_ready'], 'File ready for download!', result_file)
+                # File is verified - mark job as completed with file verification flag
+                logger.info(f"File verification completed successfully. Marking job {job_id} as completed")
+                
+                # Additional delay to ensure file system is fully consistent
+                time.sleep(1)
+                
+                # Final status update with atomic operation
+                with job_status_lock:
+                    if job_id in jobs and not jobs[job_id].get('cancelled', False):
+                        jobs[job_id]['status'] = 'completed'
+                        jobs[job_id]['progress'] = PROGRESS_MILESTONES['file_ready']
+                        jobs[job_id]['message'] = 'File ready for download!'
+                        jobs[job_id]['result_file'] = result_file
+                        jobs[job_id]['file_verified'] = True  # Important flag
+                        jobs[job_id]['last_updated'] = time.time()
+                
+                save_job_status_to_file(job_id, jobs[job_id])
+                logger.info(f"Job {job_id} marked as completed with verified file")
             else:
                 update_job_status(job_id, 'error', 0, 'No files found in output directory')
         else:
@@ -298,129 +485,92 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             del job_threads[job_id]
 
 
-
-
-
-
 def check_if_cancelled(job_id):
     """
     Robust cancellation check that works reliably in Azure.
     Uses multiple strategies to ensure cancellation is detected quickly.
     """
-    # Strategy 1: Check in-memory cache first (fastest)
-    if job_id in jobs:
-        cancelled = jobs[job_id].get('cancelled', False)
-        if cancelled:
-            logger.info(f"Cancellation detected in memory for job {job_id}")
-            return True
-    
-    # Strategy 2: Check file with explicit locking (most reliable)
-    status_file = f'tmp/{job_id}.json'
-    if os.path.exists(status_file):
-        try:
-            # Use file locking to prevent race conditions
-            with open(status_file, 'r') as f:
-                # Try to get an exclusive lock (non-blocking)
-                if hasattr(fcntl, 'flock'):  # Unix systems
-                    try:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
-                    except IOError:
-                        # If we can't get a lock, the file might be being written
-                        # Wait a tiny bit and try again
-                        time.sleep(0.01)
-                        with open(status_file, 'r') as f2:
-                            job_status = json.load(f2)
-                    else:
-                        job_status = json.load(f)
-                else:
-                    # On Windows/other systems without flock
-                    job_status = json.load(f)
-                
-                # Update in-memory cache
-                jobs[job_id] = job_status
-                cancelled = job_status.get('cancelled', False)
-                
+    try:
+        # Strategy 1: Check in-memory cache first (fastest)
+        with job_status_lock:
+            if job_id in jobs:
+                cancelled = jobs[job_id].get('cancelled', False)
                 if cancelled:
-                    logger.info(f"Cancellation detected in file for job {job_id}")
+                    logger.info(f"Cancellation detected in memory for job {job_id}")
                     return True
-        except (json.JSONDecodeError, IOError) as e:
-            # File might be corrupted or being written - try again in a moment
-            logger.warning(f"Error reading job status for {job_id}: {e}")
-            time.sleep(0.01)
-            # One retry
-            try:
-                with open(status_file, 'r') as f:
-                    job_status = json.load(f)
-                    jobs[job_id] = job_status
-                    return job_status.get('cancelled', False)
-            except:
-                # If still failing, assume not cancelled
-                pass
-    
-    return False
+        
+        # Strategy 2: Check file
+        job_status = load_job_status_from_file(job_id)
+        if job_status:
+            # Update in-memory cache
+            with job_status_lock:
+                jobs[job_id] = job_status
+            
+            cancelled = job_status.get('cancelled', False)
+            if cancelled:
+                logger.info(f"Cancellation detected in file for job {job_id}")
+                return True
+        
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking cancellation for {job_id}: {e}")
+        return False
+
 
 def update_job_status(job_id, status, progress, message, result_file=None):
     """
-    Enhanced job status update with explicit file synchronization for Azure.
+    Enhanced job status update with thread safety and race condition prevention.
     """
-    if job_id in jobs:
-        current_job = jobs[job_id]
-        cancelled = current_job.get('cancelled', False)
-        
-        # If cancelled, preserve cancellation state
-        if cancelled and status != 'cancelled':
-            return  # Don't overwrite cancellation
-        
-        jobs[job_id] = {
-            'status': 'cancelled' if cancelled else status,
-            'progress': progress,
-            'message': 'Job was cancelled' if cancelled else message,
-            'result_file': result_file,
-            'cancelled': cancelled,
-            'download_dir': current_job.get('download_dir'),
-            'merged_dir': current_job.get('merged_dir'),
-            'last_updated': time.time()  # Add timestamp for debugging
-        }
-    else:
-        jobs[job_id] = {
-            'status': status,
-            'progress': progress,
-            'message': message,
-            'result_file': result_file,
-            'cancelled': False,
-            'download_dir': None,
-            'merged_dir': None,
-            'last_updated': time.time()
-        }
-    
-    # Log status updates with more detail
-    logger.info(f"Job {job_id} updated: {status}, {progress}%, {message}")
-    if result_file:
-        logger.info(f"Result file: {result_file}")
-    
-    # Save to file with explicit synchronization
-    status_file = f'tmp/{job_id}.json'
     try:
-        # Write to a temporary file first, then rename (atomic operation)
-        temp_file = f'{status_file}.tmp'
-        with open(temp_file, 'w') as f:
-            json.dump(jobs[job_id], f, indent=2)
-            f.flush()  # Force write to disk
-            os.fsync(f.fileno())  # Ensure data is written to disk
+        with job_status_lock:
+            # Load current status if not in memory
+            if job_id not in jobs:
+                job_status = load_job_status_from_file(job_id)
+                if job_status:
+                    jobs[job_id] = job_status
+                else:
+                    logger.warning(f"Cannot update job {job_id}: job not found")
+                    return
+            
+            current_job = jobs[job_id]
+            cancelled = current_job.get('cancelled', False)
+            
+            # If cancelled, preserve cancellation state unless explicitly setting to cancelled
+            if cancelled and status != 'cancelled':
+                return  # Don't overwrite cancellation
+            
+            # Prevent backwards progress unless it's a reset or error
+            if status not in ['error', 'cancelled', 'initializing']:
+                current_progress = current_job.get('progress', 0)
+                if isinstance(progress, (int, float)) and isinstance(current_progress, (int, float)):
+                    if progress < current_progress - 5:  # Allow small backwards movement
+                        progress = current_progress
+            
+            # Update status
+            jobs[job_id] = {
+                'status': 'cancelled' if cancelled else status,
+                'progress': max(0, min(100, progress)) if isinstance(progress, (int, float)) else progress,
+                'message': 'Job was cancelled' if cancelled else message,
+                'result_file': result_file,
+                'cancelled': cancelled,
+                'download_dir': current_job.get('download_dir'),
+                'merged_dir': current_job.get('merged_dir'),
+                'file_verified': current_job.get('file_verified', False),
+                'created_at': current_job.get('created_at', time.time()),
+                'last_updated': time.time()
+            }
         
-        # Atomic rename (most filesystems guarantee this is atomic)
-        os.rename(temp_file, status_file)
-        logger.debug(f"Successfully saved status for job {job_id}")
+        # Save to file
+        save_job_status_to_file(job_id, jobs[job_id])
+        
+        # Log status updates with more detail
+        logger.info(f"Job {job_id} updated: {status}, {progress}%, {message}")
+        if result_file:
+            logger.info(f"Result file: {result_file}")
+    
     except Exception as e:
-        logger.error(f"Error saving job status for {job_id}: {e}")
-        # Clean up temp file if it exists
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except:
-                pass
-
-
+        logger.error(f"Error updating job status for {job_id}: {e}")
+        logger.error(traceback.format_exc())
 
 
 def cleanup_job_files(job_id):
@@ -431,18 +581,21 @@ def cleanup_job_files(job_id):
         logger.info(f"Cleaning up job files for {job_id}")
 
         try:
-            if job_id not in jobs:
-                logger.warning(f"Cannot cleanup job {job_id}: job not found in memory")
-                # Try to load from disk
-                try:
-                    with open(f'tmp/{job_id}.json', 'r') as f:
-                        jobs[job_id] = json.load(f)
-                except Exception as e:
-                    logger.warning(f"Could not load job {job_id} from disk: {e}")
-                    return
+            # Load job status from file if not in memory
+            with job_status_lock:
+                if job_id not in jobs:
+                    logger.warning(f"Cannot cleanup job {job_id}: job not found in memory")
+                    job_status = load_job_status_from_file(job_id)
+                    if job_status:
+                        jobs[job_id] = job_status
+                    else:
+                        logger.warning(f"Could not load job {job_id} from disk")
+                        return
+                
+                current_job = jobs[job_id]
             
-            download_dir = jobs[job_id].get('download_dir')
-            merged_dir = jobs[job_id].get('merged_dir')
+            download_dir = current_job.get('download_dir')
+            merged_dir = current_job.get('merged_dir')
             
             # Clean up download directory
             if download_dir and os.path.exists(download_dir):
@@ -460,7 +613,6 @@ def cleanup_job_files(job_id):
                 except Exception as e:
                     logger.error(f"Error removing merged directory: {e}")
 
-                    
             # Remove status file
             status_file = f'tmp/{job_id}.json'
             if os.path.exists(status_file):
@@ -473,8 +625,9 @@ def cleanup_job_files(job_id):
             logger.info(f"Cleanup completed for job {job_id}")
             
             # Remove from memory
-            if job_id in jobs:
-                del jobs[job_id]
+            with job_status_lock:
+                if job_id in jobs:
+                    del jobs[job_id]
                 
         except Exception as e:
             logger.error(f"Error cleaning up job {job_id}: {str(e)}")
@@ -485,35 +638,73 @@ def cleanup_job_files(job_id):
     cleanup_thread.daemon = True
     cleanup_thread.start()
 
+
 @app.route('/api/status/<job_id>')
 def job_status(job_id):
-    """Get the status of a job"""
+    """Get the status of a job with enhanced verification"""
     try:
-        # Check memory cache first
         status = None
-        if job_id in jobs:
-            status = jobs[job_id].copy()  # Make a copy to avoid modifying the original
-        else:
-            # Try to load from disk if not in memory
-            try:
-                with open(f'tmp/{job_id}.json', 'r') as f:
-                    status = json.load(f)
-                    # Cache in memory
+        
+        # Check memory cache first with proper locking
+        with job_status_lock:
+            if job_id in jobs:
+                status = jobs[job_id].copy()  # Make a copy to avoid modifying the original
+        
+        # Load from disk if not in memory
+        if not status:
+            status = load_job_status_from_file(job_id)
+            if status:
+                # Cache in memory
+                with job_status_lock:
                     jobs[job_id] = status
-            except Exception as e:
-                logger.error(f"Error loading job status for {job_id}: {str(e)}")
+            else:
+                logger.error(f"Job {job_id} not found")
                 return jsonify({'error': 'Job not found'}), 404
         
-        # Add a download_ready flag to clearly indicate when download is truly available
-        if status.get('status') == 'completed' and status.get('result_file') and os.path.exists(status.get('result_file')):
-            status['download_ready'] = True
-        else:
-            status['download_ready'] = False
+        # Enhanced download readiness check
+        download_ready = False
+        
+        if (status.get('status') == 'completed' and 
+            status.get('result_file') and 
+            status.get('file_verified', False)):  # New verification flag
+            
+            result_file = status.get('result_file')
+            
+            # Double-check file still exists and is readable
+            if os.path.exists(result_file) and os.access(result_file, os.R_OK):
+                try:
+                    # Quick file verification
+                    file_size = os.path.getsize(result_file)
+                    if file_size > 0:
+                        download_ready = True
+                        status['file_size'] = file_size  # Include file size in response
+                    else:
+                        logger.warning(f"File exists but is empty: {result_file}")
+                except Exception as e:
+                    logger.warning(f"Error verifying file for download: {e}")
+            else:
+                logger.warning(f"File not accessible: {result_file}")
+        
+        status['download_ready'] = download_ready
+        
+        # Add debug information for troubleshooting
+        if not download_ready and status.get('status') == 'completed':
+            debug_info = {
+                'has_result_file': bool(status.get('result_file')),
+                'file_verified': status.get('file_verified', False),
+                'file_exists': bool(status.get('result_file') and os.path.exists(status.get('result_file'))),
+                'file_accessible': bool(status.get('result_file') and os.path.exists(status.get('result_file')) 
+                                      and os.access(status.get('result_file'), os.R_OK))
+            }
+            status['debug_info'] = debug_info
+            logger.debug(f"Download not ready for job {job_id}: {debug_info}")
             
         return jsonify(status)
     except Exception as e:
         logger.error(f"Error in job_status endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/download/<job_id>')
 def download_file(job_id):
@@ -523,32 +714,39 @@ def download_file(job_id):
         
         # Get job status
         status = None
-        if job_id in jobs:
-            status = jobs[job_id]
-            logger.info(f"Found job status in memory: {status.get('status')}")
-        else:
-            # Try to load from disk
-            try:
-                with open(f'tmp/{job_id}.json', 'r') as f:
-                    status = json.load(f)
-                    logger.info(f"Loaded job status from disk: {status.get('status')}")
-                    # Cache in memory
-                    jobs[job_id] = status
-            except Exception as e:
-                logger.error(f"Failed to load job status: {str(e)}")
-                return jsonify({'error': 'Job status not found'}), 404
+        
+        with job_status_lock:
+            if job_id in jobs:
+                status = jobs[job_id]
+                logger.info(f"Found job status in memory: {status.get('status')}")
         
         if not status:
-            logger.error(f"No status found for job {job_id}")
-            return jsonify({'error': 'Job status not found'}), 404
-            
-        # Verify job is completed
+            # Try to load from disk
+            status = load_job_status_from_file(job_id)
+            if status:
+                logger.info(f"Loaded job status from disk: {status.get('status')}")
+                # Cache in memory
+                with job_status_lock:
+                    jobs[job_id] = status
+            else:
+                logger.error(f"Failed to load job status for {job_id}")
+                return jsonify({'error': 'Job status not found'}), 404
+        
+        # Enhanced completion check
         if status.get('status') != 'completed':
             logger.error(f"Job not completed: {status.get('status')}")
             return jsonify({
                 'error': 'Job not completed', 
                 'status': status.get('status'),
-                'message': 'File is not ready yet. Please wait...'
+                'message': f'Job status is {status.get("status")}. Please wait for completion.'
+            }), 400
+        
+        # Check file verification flag
+        if not status.get('file_verified', False):
+            logger.error(f"File not verified for job {job_id}")
+            return jsonify({
+                'error': 'File not verified', 
+                'message': 'File verification is still in progress. Please wait a moment and try again.'
             }), 400
         
         # Get file path
@@ -557,29 +755,37 @@ def download_file(job_id):
             logger.error("No result file path in job status")
             return jsonify({'error': 'No result file found'}), 404
         
-        # Enhanced file verification before download
-        logger.info(f"Verifying file before download: {file_path}")
+        # Final file verification before download
+        logger.info(f"Performing final verification before download: {file_path}")
         
-        # Multiple verification steps
         if not os.path.exists(file_path):
             logger.error(f"File does not exist: {file_path}")
             return jsonify({'error': 'File not found'}), 404
         
-        # Verify file is readable and not empty
+        if not os.access(file_path, os.R_OK):
+            logger.error(f"File not readable: {file_path}")
+            return jsonify({'error': 'File not accessible'}), 403
+        
+        # Verify file is not empty and is readable
         try:
             file_size = os.path.getsize(file_path)
             if file_size == 0:
                 logger.error(f"File is empty: {file_path}")
                 return jsonify({'error': 'File is empty'}), 500
-                
-            # Attempt to read the file to verify it's not corrupted
+            
+            # Quick read test
             with open(file_path, 'rb') as test_file:
-                # Read a chunk to verify file integrity
-                test_file.read(1024)
+                test_file.read(1024)  # Read first 1KB to ensure file is accessible
+                test_file.seek(0, 2)  # Go to end
+                actual_size = test_file.tell()
                 
-            logger.info(f"File verified successfully: {file_path} (size: {file_size} bytes)")
+                if actual_size != file_size:
+                    logger.error(f"File size mismatch: {file_path}")
+                    return jsonify({'error': 'File corruption detected'}), 500
+                
+            logger.info(f"Final verification passed: {file_path} (size: {file_size} bytes)")
         except Exception as e:
-            logger.error(f"File verification failed: {str(e)}")
+            logger.error(f"Final file verification failed: {str(e)}")
             return jsonify({'error': f'File verification failed: {str(e)}'}), 500
         
         try:
@@ -607,9 +813,10 @@ def download_file(job_id):
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/api/cancel', methods=['POST'])
 def cancel_job():
-    """Enhanced cancellation with Azure-specific debugging."""
+    """Enhanced cancellation with Azure-specific debugging and atomic operations."""
     try:
         job_id = request.json.get('job_id')
         if not job_id:
@@ -617,42 +824,54 @@ def cancel_job():
             
         logger.info(f"Cancellation requested for job {job_id}")
         
-        # Check if job exists with detailed logging
-        if job_id not in jobs and not os.path.exists(f'tmp/{job_id}.json'):
+        # Check if job exists with thread safety
+        job_found = False
+        
+        with job_status_lock:
+            if job_id in jobs:
+                job_found = True
+        
+        if not job_found:
+            # Try to load from file
+            job_status = load_job_status_from_file(job_id)
+            if job_status:
+                with job_status_lock:
+                    jobs[job_id] = job_status
+                    job_found = True
+        
+        if not job_found:
             logger.error(f"Job {job_id} not found for cancellation")
             return jsonify({'error': 'Job not found'}), 404
+        
+        # Update status atomically
+        with job_status_lock:
+            current_job = jobs[job_id]
+            old_status = current_job.get('status', 'unknown')
             
-        # Load job from disk if not in memory
-        if job_id not in jobs:
-            try:
-                with open(f'tmp/{job_id}.json', 'r') as f:
-                    jobs[job_id] = json.load(f)
-                logger.info(f"Loaded job {job_id} from disk for cancellation")
-            except Exception as e:
-                logger.error(f"Failed to load job status for cancellation: {str(e)}")
-                return jsonify({'error': 'Failed to load job status'}), 500
+            # Update all cancellation-related fields
+            jobs[job_id]['cancelled'] = True
+            jobs[job_id]['status'] = 'cancelled'
+            jobs[job_id]['message'] = 'Job cancelled by user'
+            jobs[job_id]['last_updated'] = time.time()
+            
+            logger.info(f"Job {job_id} status changed from {old_status} to cancelled")
         
-        # Mark job as cancelled with explicit logging
-        old_status = jobs[job_id].get('status', 'unknown')
-        jobs[job_id]['cancelled'] = True
-        jobs[job_id]['status'] = 'cancelled'
-        jobs[job_id]['message'] = 'Job cancelled by user'
-        
-        logger.info(f"Job {job_id} status changed from {old_status} to cancelled")
-        
-        # Save to disk with multiple attempts
+        # Save to disk with retry logic
+        save_successful = False
         for attempt in range(3):
             try:
-                with open(f'tmp/{job_id}.json', 'w') as f:
-                    json.dump(jobs[job_id], f, indent=2)
-                    f.flush()
-                    os.fsync(f.fileno())
+                save_job_status_to_file(job_id, jobs[job_id])
+                save_successful = True
                 logger.info(f"Successfully saved cancellation status for job {job_id} (attempt {attempt+1})")
                 break
             except Exception as e:
                 logger.warning(f"Failed to save cancellation status (attempt {attempt+1}): {e}")
                 if attempt < 2:
                     time.sleep(0.1)  # Brief wait before retry
+        
+        if not save_successful:
+            logger.error(f"Failed to save cancellation status after 3 attempts for job {job_id}")
+            return jsonify({'error': 'Failed to save cancellation status'}), 500
         
         return jsonify({'success': True, 'message': 'Job cancelled successfully'})
     except Exception as e:
