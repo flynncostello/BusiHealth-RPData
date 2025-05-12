@@ -148,11 +148,12 @@ def process():
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+
 def run_job(job_id, locations, property_types, min_floor_area, max_floor_area, 
             business_type, headless, download_dir, output_dir):
-    """Run the main processing job in a background thread with job-specific directories"""
+    """Run the main processing job with simplified cancellation and progress tracking"""
     try:
-        # Define progress milestones with smoother progression
+        # Define clear progress milestones
         PROGRESS_MILESTONES = {
             'start': 5,
             'login_start': 8,
@@ -168,35 +169,38 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             'file_ready': 100
         }
         
-        # Create smooth progress callback with meaningful messages
+        # Simple, direct cancellation check
+        def is_cancelled():
+            """Simple function that returns True if the job should be cancelled"""
+            return check_if_cancelled(job_id)
+        
+        # Progress callback that also checks cancellation
         def progress_callback(percentage, message):
-            # Clean up the message - remove cancellation check messages
-            if message is None:
-                return True  # Skip None messages (from cancellation checks)
-            if 'cancelled' in message.lower() or 'checking' in message.lower():
-                return True  # Skip these messages
-                        
-            # Don't let progress go backwards, but allow natural progression
-            current_progress = jobs[job_id].get('progress', 0)
-            if percentage < current_progress:
-                # Only use current progress if the new percentage is significantly lower
-                if current_progress - percentage > 5:
-                    percentage = current_progress
+            # Skip None messages and cancellation check messages
+            if message is None or (message and 'cancel' in message.lower()):
+                return not is_cancelled()  # Still check cancellation, just don't show message
             
+            # Prevent progress from going backwards significantly
+            current_progress = jobs[job_id].get('progress', 0)
+            if percentage < current_progress and current_progress - percentage > 5:
+                percentage = current_progress
+            
+            # Update status
             update_job_status(job_id, 'running', percentage, message)
             
-            # Check for cancellation
-            return not check_if_cancelled(job_id)
+            # Return False if cancelled (tells caller to stop)
+            return not is_cancelled()
         
+        # Initial progress update
         update_job_status(job_id, 'running', PROGRESS_MILESTONES['start'], 'Initializing search environment...')
         
-        # Check if job is cancelled before starting
-        if check_if_cancelled(job_id):
+        # Check cancellation before starting
+        if is_cancelled():
             logger.info(f"Job {job_id} was cancelled before starting")
             cleanup_job_files(job_id)
             return
         
-        # Call main function from rpdata_scraper
+        # Call main function with the simple cancellation check
         logger.info(f"Starting main scraper, headless={headless}")
         result = main(
             locations=locations,
@@ -206,78 +210,66 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             business_type=business_type,
             headless=headless,
             progress_callback=progress_callback,
+            is_cancelled=is_cancelled,  # Pass the simple function
             download_dir=download_dir,
             output_dir=output_dir
         )
 
-        # Check if job was cancelled during processing
-        if check_if_cancelled(job_id):
-            logger.info(f"Job {job_id} was cancelled after main processing")
+        # Check cancellation after processing
+        if is_cancelled():
+            logger.info(f"Job {job_id} was cancelled during processing")
             cleanup_job_files(job_id)
             return
 
         if result == 'No files downloaded':
-            logger.error(f"No files downloaded during scraping for job {job_id}")
-            update_job_status(job_id, 'error', 0, 'No results found. Please check your search criteria.')
+            update_job_status(job_id, 'error', 0, 'No Results Found on RPData for this search. Please go back to form and try again.')
             return
         
-        # Update progress to merge phase
-        progress_callback(PROGRESS_MILESTONES['merge_start'], "Processing files into final merged file...")
         
-        # Verify the result directory exists and has files
+        # File verification process with cancellation checks
         if result and os.path.exists(result):
             files = os.listdir(result)
             if files:
-                # Sort by modification time (newest first)
                 files.sort(key=lambda x: os.path.getmtime(os.path.join(result, x)), reverse=True)
                 result_file = os.path.join(result, files[0])
                 result_file = os.path.abspath(result_file)
                 
-                # Update progress but don't mark as complete yet
                 progress_callback(PROGRESS_MILESTONES['merge_complete'], "Verifying file is ready for download...")
                 
-                # Enhanced file verification - ensure it's completely written and accessible
-                logger.info(f"Verifying file is ready: {result_file}")
+                # File verification with cancellation checks
+                logger.info(f"Verifying file: {result_file}")
                 file_ready = False
                 
-                # More robust verification with multiple checks
-                for attempt in range(10):  # Increased from 5 to 10 attempts
-                    if check_if_cancelled(job_id):
+                for attempt in range(10):
+                    if is_cancelled():  # Simple check
                         return
                         
                     if os.path.exists(result_file) and os.access(result_file, os.R_OK):
                         try:
-                            # Test file accessibility comprehensively
                             file_size = os.path.getsize(result_file)
-                            if file_size > 0:  # Ensure file is not empty
+                            if file_size > 0:
                                 with open(result_file, 'rb') as test_file:
-                                    # Read chunks to verify file integrity
                                     test_file.read(1024)
-                                    test_file.seek(0, 2)  # Seek to end
+                                    test_file.seek(0, 2)
                                     actual_size = test_file.tell()
-                                    if actual_size == file_size:  # File size matches
+                                    if actual_size == file_size:
                                         file_ready = True
-                                        logger.info(f"File verified as ready after {attempt+1} attempts")
+                                        logger.info(f"File verified after {attempt+1} attempts")
                                         break
                         except Exception as e:
-                            logger.warning(f"File verification attempt {attempt+1} failed: {e}")
+                            logger.warning(f"Verification attempt {attempt+1} failed: {e}")
                     
-                    # Exponential backoff with longer delays
-                    time.sleep(min(2 ** attempt, 8))  # Max 8 seconds between attempts
+                    time.sleep(min(2 ** attempt, 8))
                 
                 if not file_ready:
-                    logger.error("File verification failed after all attempts")
-                    update_job_status(job_id, 'error', 0, 'File verification failed. Please try again.')
+                    update_job_status(job_id, 'error', 0, 'File verification failed.')
                     return
                 
-                # Only now mark as complete when file is truly ready
-                logger.info(f"File is ready, marking job {job_id} as completed")
+                logger.info(f"Marking job {job_id} as completed")
                 update_job_status(job_id, 'completed', PROGRESS_MILESTONES['file_ready'], 'File ready for download!', result_file)
             else:
-                logger.error(f"No files found in {result}")
                 update_job_status(job_id, 'error', 0, 'No files found in output directory')
         else:
-            logger.error(f"Result directory not found: {result}")
             update_job_status(job_id, 'error', 0, 'Output directory not found')
     
     except Exception as e:
@@ -285,9 +277,13 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
         logger.error(traceback.format_exc())
         update_job_status(job_id, 'error', 0, f'An error occurred: {str(e)}')
     finally:
-        # Clean up job thread reference
         if job_id in job_threads:
             del job_threads[job_id]
+
+
+
+
+
 
 def check_if_cancelled(job_id):
     """Check if a job has been marked for cancellation"""
