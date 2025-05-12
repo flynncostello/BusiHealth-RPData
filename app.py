@@ -11,6 +11,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
 import time
+import fcntl  # For file locking on Unix systems
 
 # Add current directory to path to help with imports in Docker
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +58,15 @@ if is_containerized:
 os.makedirs('downloads', exist_ok=True)
 os.makedirs('merged_properties', exist_ok=True)
 os.makedirs('tmp', exist_ok=True)
+
+# At the top of app.py
+is_azure = os.environ.get('WEBSITE_SITE_NAME') is not None
+if is_azure:
+    logger.info(f"Running in Azure: {os.environ.get('WEBSITE_SITE_NAME')}")
+    # Adjust timeouts for Azure
+    FILE_OPERATION_TIMEOUT = 2.0  # Increased timeout for file operations
+else:
+    FILE_OPERATION_TIMEOUT = 0.5  # Faster locally
 
 # Store running jobs
 jobs = {}
@@ -169,18 +179,25 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             'file_ready': 100
         }
         
-        # Simple, direct cancellation check
+        # Enhanced cancellation check with logging
         def is_cancelled():
-            """Simple function that returns True if the job should be cancelled"""
-            return check_if_cancelled(job_id)
+            """Enhanced cancellation check with detailed logging for debugging."""
+            cancelled = check_if_cancelled(job_id)
+            if cancelled:
+                logger.info(f"Cancellation detected for job {job_id} (Azure-safe check)")
+            return cancelled
         
-        # Progress callback that also checks cancellation
+        # Enhanced progress callback with more frequent checks
         def progress_callback(percentage, message):
+            # Log every progress update for debugging
+            logger.debug(f"Progress update for job {job_id}: {percentage}% - {message}")
+            
             # Skip None messages and cancellation check messages
             if message is None or (message and 'cancel' in message.lower()):
-                return not is_cancelled()  # Still check cancellation, just don't show message
+                # Still do the cancellation check even for skipped messages
+                return not is_cancelled()
             
-            # Prevent progress from going backwards significantly
+            # Prevent significant backwards progress
             current_progress = jobs[job_id].get('progress', 0)
             if percentage < current_progress and current_progress - percentage > 5:
                 percentage = current_progress
@@ -188,7 +205,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             # Update status
             update_job_status(job_id, 'running', percentage, message)
             
-            # Return False if cancelled (tells caller to stop)
+            # Check cancellation after every update
             return not is_cancelled()
         
         # Initial progress update
@@ -225,7 +242,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
             update_job_status(job_id, 'error', 0, 'No Results Found on RPData for this search. Please go back to form and try again.')
             return
         
-        
+
         # File verification process with cancellation checks
         if result and os.path.exists(result):
             files = os.listdir(result)
@@ -286,29 +303,73 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
 
 
 def check_if_cancelled(job_id):
-    """Check if a job has been marked for cancellation"""
-    if job_id not in jobs:
-        try:
-            # Try to load from disk if not in memory
-            with open(f'tmp/{job_id}.json', 'r') as f:
-                job_status = json.load(f)
-                jobs[job_id] = job_status
-        except Exception:
-            # If we can't load the status, assume not cancelled
-            return False
+    """
+    Robust cancellation check that works reliably in Azure.
+    Uses multiple strategies to ensure cancellation is detected quickly.
+    """
+    # Strategy 1: Check in-memory cache first (fastest)
+    if job_id in jobs:
+        cancelled = jobs[job_id].get('cancelled', False)
+        if cancelled:
+            logger.info(f"Cancellation detected in memory for job {job_id}")
+            return True
     
-    # Return cancellation status
-    return jobs[job_id].get('cancelled', False)
+    # Strategy 2: Check file with explicit locking (most reliable)
+    status_file = f'tmp/{job_id}.json'
+    if os.path.exists(status_file):
+        try:
+            # Use file locking to prevent race conditions
+            with open(status_file, 'r') as f:
+                # Try to get an exclusive lock (non-blocking)
+                if hasattr(fcntl, 'flock'):  # Unix systems
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    except IOError:
+                        # If we can't get a lock, the file might be being written
+                        # Wait a tiny bit and try again
+                        time.sleep(0.01)
+                        with open(status_file, 'r') as f2:
+                            job_status = json.load(f2)
+                    else:
+                        job_status = json.load(f)
+                else:
+                    # On Windows/other systems without flock
+                    job_status = json.load(f)
+                
+                # Update in-memory cache
+                jobs[job_id] = job_status
+                cancelled = job_status.get('cancelled', False)
+                
+                if cancelled:
+                    logger.info(f"Cancellation detected in file for job {job_id}")
+                    return True
+        except (json.JSONDecodeError, IOError) as e:
+            # File might be corrupted or being written - try again in a moment
+            logger.warning(f"Error reading job status for {job_id}: {e}")
+            time.sleep(0.01)
+            # One retry
+            try:
+                with open(status_file, 'r') as f:
+                    job_status = json.load(f)
+                    jobs[job_id] = job_status
+                    return job_status.get('cancelled', False)
+            except:
+                # If still failing, assume not cancelled
+                pass
+    
+    return False
 
 def update_job_status(job_id, status, progress, message, result_file=None):
-    """Update the status of a job"""
+    """
+    Enhanced job status update with explicit file synchronization for Azure.
+    """
     if job_id in jobs:
         current_job = jobs[job_id]
         cancelled = current_job.get('cancelled', False)
         
-        # If cancelled, don't update status further
+        # If cancelled, preserve cancellation state
         if cancelled and status != 'cancelled':
-            return
+            return  # Don't overwrite cancellation
         
         jobs[job_id] = {
             'status': 'cancelled' if cancelled else status,
@@ -316,12 +377,11 @@ def update_job_status(job_id, status, progress, message, result_file=None):
             'message': 'Job was cancelled' if cancelled else message,
             'result_file': result_file,
             'cancelled': cancelled,
-            # Preserve the directory paths
             'download_dir': current_job.get('download_dir'),
-            'merged_dir': current_job.get('merged_dir')
+            'merged_dir': current_job.get('merged_dir'),
+            'last_updated': time.time()  # Add timestamp for debugging
         }
     else:
-        # Create new job status if it doesn't exist in memory
         jobs[job_id] = {
             'status': status,
             'progress': progress,
@@ -329,17 +389,39 @@ def update_job_status(job_id, status, progress, message, result_file=None):
             'result_file': result_file,
             'cancelled': False,
             'download_dir': None,
-            'merged_dir': None
+            'merged_dir': None,
+            'last_updated': time.time()
         }
     
-    # Log status updates
+    # Log status updates with more detail
     logger.info(f"Job {job_id} updated: {status}, {progress}%, {message}")
     if result_file:
         logger.info(f"Result file: {result_file}")
     
-    # Save to file in case server restarts
-    with open(f'tmp/{job_id}.json', 'w') as f:
-        json.dump(jobs[job_id], f)
+    # Save to file with explicit synchronization
+    status_file = f'tmp/{job_id}.json'
+    try:
+        # Write to a temporary file first, then rename (atomic operation)
+        temp_file = f'{status_file}.tmp'
+        with open(temp_file, 'w') as f:
+            json.dump(jobs[job_id], f, indent=2)
+            f.flush()  # Force write to disk
+            os.fsync(f.fileno())  # Ensure data is written to disk
+        
+        # Atomic rename (most filesystems guarantee this is atomic)
+        os.rename(temp_file, status_file)
+        logger.debug(f"Successfully saved status for job {job_id}")
+    except Exception as e:
+        logger.error(f"Error saving job status for {job_id}: {e}")
+        # Clean up temp file if it exists
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except:
+                pass
+
+
+
 
 def cleanup_job_files(job_id):
     """Clean up job-specific directories after successful download"""
@@ -527,7 +609,7 @@ def download_file(job_id):
 
 @app.route('/api/cancel', methods=['POST'])
 def cancel_job():
-    """Cancel a running job and clean up resources"""
+    """Enhanced cancellation with Azure-specific debugging."""
     try:
         job_id = request.json.get('job_id')
         if not job_id:
@@ -535,7 +617,7 @@ def cancel_job():
             
         logger.info(f"Cancellation requested for job {job_id}")
         
-        # Check if job exists
+        # Check if job exists with detailed logging
         if job_id not in jobs and not os.path.exists(f'tmp/{job_id}.json'):
             logger.error(f"Job {job_id} not found for cancellation")
             return jsonify({'error': 'Job not found'}), 404
@@ -545,21 +627,32 @@ def cancel_job():
             try:
                 with open(f'tmp/{job_id}.json', 'r') as f:
                     jobs[job_id] = json.load(f)
+                logger.info(f"Loaded job {job_id} from disk for cancellation")
             except Exception as e:
                 logger.error(f"Failed to load job status for cancellation: {str(e)}")
                 return jsonify({'error': 'Failed to load job status'}), 500
         
-        # Mark job as cancelled
+        # Mark job as cancelled with explicit logging
+        old_status = jobs[job_id].get('status', 'unknown')
         jobs[job_id]['cancelled'] = True
         jobs[job_id]['status'] = 'cancelled'
         jobs[job_id]['message'] = 'Job cancelled by user'
         
-        # Save to disk immediately
-        with open(f'tmp/{job_id}.json', 'w') as f:
-            json.dump(jobs[job_id], f)
+        logger.info(f"Job {job_id} status changed from {old_status} to cancelled")
         
-        # Schedule cleanup
-        cleanup_job_files(job_id)
+        # Save to disk with multiple attempts
+        for attempt in range(3):
+            try:
+                with open(f'tmp/{job_id}.json', 'w') as f:
+                    json.dump(jobs[job_id], f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                logger.info(f"Successfully saved cancellation status for job {job_id} (attempt {attempt+1})")
+                break
+            except Exception as e:
+                logger.warning(f"Failed to save cancellation status (attempt {attempt+1}): {e}")
+                if attempt < 2:
+                    time.sleep(0.1)  # Brief wait before retry
         
         return jsonify({'success': True, 'message': 'Job cancelled successfully'})
     except Exception as e:
