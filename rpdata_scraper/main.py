@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Main script to run the RP Data scraper and merger
-# Updated to support job-specific directories for multi-user isolation
+# Updated with simplified progress handling that works in harmony with scrape_rpdata.py
 
 import os
 import sys
@@ -33,6 +33,9 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
     """
     Main function to scrape RP Data and process the results.
     
+    This function now acts as a simple coordinator, letting scrape_rpdata.py
+    handle all the detailed progress reporting for the scraping phase.
+    
     Args:
         locations (list): List of locations to search
         property_types (list): List of property types to filter for
@@ -55,7 +58,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             logger.info(f"Progress: {percentage}% - {message}")
             return True  # Always continue
     
-    # Define progress milestones that align with app.py
+    # Define progress milestones that match exactly with scrape_rpdata.py
     PROGRESS_MILESTONES = {
         'login_start': 8,
         'login_complete': 15,
@@ -66,7 +69,8 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         'sales_start': 78,
         'sales_complete': 90,
         'merge_start': 92,
-        'merge_complete': 98
+        'merge_complete': 98,
+        'file_ready': 100
     }
     
     try:
@@ -113,47 +117,8 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Download Directory: {download_dir}")
         logger.info(f"Output Directory: {output_dir}")
         
-        # Create enhanced progress callback for scraping phase
-        def scraping_progress_callback(percentage, message):
-            # Handle None messages from cancellation checks
-            if message is None:
-                return progress_callback(percentage, None)
-            # Map scraper progress to our milestones
-            elif 'login' in message.lower():
-                if 'starting' in message.lower() or 'logging' in message.lower():
-                    actual_percentage = PROGRESS_MILESTONES['login_start']
-                else:
-                    # Scale login progress between start and complete
-                    actual_percentage = PROGRESS_MILESTONES['login_start'] + \
-                        (percentage / 100) * (PROGRESS_MILESTONES['login_complete'] - PROGRESS_MILESTONES['login_start'])
-            elif 'for rent' in message.lower():
-                if 'starting' in message.lower():
-                    actual_percentage = PROGRESS_MILESTONES['rent_start']
-                else:
-                    # Scale rent progress between start and complete
-                    actual_percentage = PROGRESS_MILESTONES['rent_start'] + \
-                        (percentage / 100) * (PROGRESS_MILESTONES['rent_complete'] - PROGRESS_MILESTONES['rent_start'])
-            elif 'for sale' in message.lower():
-                if 'starting' in message.lower():
-                    actual_percentage = PROGRESS_MILESTONES['sale_start']
-                else:
-                    # Scale sale progress between start and complete
-                    actual_percentage = PROGRESS_MILESTONES['sale_start'] + \
-                        (percentage / 100) * (PROGRESS_MILESTONES['sale_complete'] - PROGRESS_MILESTONES['sale_start'])
-            elif 'sales' in message.lower():
-                if 'starting' in message.lower():
-                    actual_percentage = PROGRESS_MILESTONES['sales_start']
-                else:
-                    # Scale sales progress between start and complete
-                    actual_percentage = PROGRESS_MILESTONES['sales_start'] + \
-                        (percentage / 100) * (PROGRESS_MILESTONES['sales_complete'] - PROGRESS_MILESTONES['sales_start'])
-            else:
-                # For other messages, distribute remaining percentage
-                actual_percentage = max(percentage, 8)  # Never go below login start
-            
-            return progress_callback(int(actual_percentage), message)
-        
         # Step 1: Scrape the data
+        # The scrape_rpdata function now handles all detailed progress reporting
         logger.info("\n===== STEP 1: SCRAPING DATA FROM RP DATA =====\n")
         result_files, global_scraper = scrape_rpdata(
             locations=locations,
@@ -161,7 +126,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
             min_floor_area=min_floor_area,
             max_floor_area=max_floor_area,
             headless=headless,
-            progress_callback=scraping_progress_callback,
+            progress_callback=progress_callback,  # Pass through directly
             download_dir=download_dir
         )
         
@@ -195,11 +160,19 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         
         # Create enhanced progress callback for merge phase
         def merge_progress_callback(percentage, message):
+            """
+            Map merge progress to our milestones (92-98% range)
+            """
+            # Handle None messages from cancellation checks
+            if message is None:
+                return progress_callback(percentage, None)
+            
             # Map merge progress to our milestones
             actual_percentage = PROGRESS_MILESTONES['merge_start'] + \
                 (percentage / 100) * (PROGRESS_MILESTONES['merge_complete'] - PROGRESS_MILESTONES['merge_start'])
             return progress_callback(int(actual_percentage), message)
         
+        # Process and merge the Excel files
         from merge_excel import process_excel_files
         success = process_excel_files(
             files_dict=result_files,
@@ -218,7 +191,7 @@ def main(locations=None, property_types=None, min_floor_area="Min", max_floor_ar
         logger.info(f"Total processing time: {elapsed_time:.2f} seconds")
         
         # Final cancellation check
-        if progress_callback(98, "Processing complete, preparing final file...") is False:
+        if progress_callback(PROGRESS_MILESTONES['merge_complete'], "Processing complete, preparing final file...") is False:
             logger.info("Job cancelled at final stage")
             return None
         

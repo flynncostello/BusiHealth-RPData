@@ -91,7 +91,7 @@ class RPDataScraper(RPDataBase):
                     return None
             
             # Add a brief pause after login to ensure the dashboard is loaded
-            time.sleep(1.5)
+            time.sleep(0.75)
             
             # Select the search type (Sales, For Sale, For Rent)
             if not self.select_search_type(search_type):
@@ -271,7 +271,7 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Small delay between fields
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.05, 0.1)
             
             # Find and fill password field
             password_field = self.wait_and_find_element(By.ID, "password", timeout=4)
@@ -285,7 +285,7 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Small delay before clicking login
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.05, 0.1)
             
             # Find and click login button
             login_button = self.wait_and_find_clickable(By.ID, "signOnButton", timeout=4)
@@ -302,7 +302,7 @@ class RPDataScraper(RPDataBase):
                 return False
             
             # Brief wait for login to process
-            time.sleep(2)
+            time.sleep(1)
             
             # Wait for login to complete and redirect to dashboard
             try:
@@ -315,7 +315,7 @@ class RPDataScraper(RPDataBase):
                 logger.info("Login successful - redirected to dashboard")
                 
                 # Brief wait to ensure dashboard is loaded
-                time.sleep(1)
+                time.sleep(0.5)
                 
                 return True
             except TimeoutException:
@@ -456,7 +456,7 @@ class RPDataScraper(RPDataBase):
             # Try typing a single character to trigger suggestions
             search_bar.send_keys('a')  # or use a very short, generic string
             # Brief delay for suggestions to load
-            self.random_delay(0.3, 0.5)
+            self.random_delay(0.5, 0.8)
             
             # Alternatively, try simulating keyboard events
             search_bar.send_keys(Keys.DOWN)  # might trigger dropdown
