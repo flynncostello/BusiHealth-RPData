@@ -468,6 +468,7 @@ def run_job(job_id, locations, property_types, min_floor_area, max_floor_area,
                         jobs[job_id]['result_file'] = result_file
                         jobs[job_id]['file_verified'] = True  # Important flag
                         jobs[job_id]['last_updated'] = time.time()
+                        jobs[job_id]['completed_time'] = time.time()  # Track completion timestamp
                 
                 save_job_status_to_file(job_id, jobs[job_id])
                 logger.info(f"Job {job_id} marked as completed with verified file")

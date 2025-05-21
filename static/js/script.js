@@ -255,7 +255,8 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Check job status
+    
+    // Find this section in your checkStatus function:
     function checkStatus() {
         if (!currentJobId) return;
         
@@ -279,6 +280,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Set the download link
                 downloadBtn.href = `/api/download/${currentJobId}`;
                 
+                // REPLACE THIS ENTIRE BLOCK:
                 // If we're at 100% but haven't shown the download button yet,
                 // verify that the file is truly ready for download
                 if (downloadContainer.classList.contains('d-none')) {
@@ -309,6 +311,33 @@ document.addEventListener('DOMContentLoaded', function() {
                             // Continue polling
                         });
                 }
+                
+                // WITH THIS NEW BLOCK:
+                if (downloadContainer.classList.contains('d-none')) {
+                    // Check if the file was recently marked as completed
+                    const completedTime = data.completed_time || data.last_updated || 0;
+                    const currentTime = Date.now() / 1000; // Convert to seconds
+                    const fileAge = currentTime - completedTime;
+                    
+                    // Only show download if file has been ready for at least 60 seconds
+                    // OR if download_ready flag is explicitly true
+                    if (data.download_ready === true || fileAge >= 60) {
+                        // File has been ready for at least 60 seconds or marked as ready by server
+                        clearInterval(statusInterval);
+                        statusInterval = null;
+                        
+                        // Show download container
+                        downloadContainer.classList.remove('d-none');
+                        statusMessage.textContent = 'Processing complete! File is ready for download.';
+                        isProcessing = false;
+                    } else {
+                        // Calculate remaining time
+                        const remainingSeconds = Math.max(1, Math.ceil(60 - fileAge));
+                        statusMessage.textContent = `File processing complete! Download will be ready in ${remainingSeconds} seconds...`;
+                        
+                        // Continue polling to update the countdown
+                    }
+                }
             }
             
             // Check if error
@@ -324,7 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Don't show error, just keep checking
         });
     }
-    
+
     // Show error message
     function showError(message) {
         errorMessage.textContent = message;
